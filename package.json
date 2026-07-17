@@ -1,0 +1,30 @@
+{
+  "name": "dnd-ai",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "play": "tsx src/index.tsx",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "spike": "tsx scripts/spike.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "smoke:memory": "tsx scripts/memory-smoke.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.212",
+    "ink": "^7.1.1",
+    "ink-text-input": "^6.0.0",
+    "react": "^19.2.7",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
