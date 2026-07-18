@@ -106,6 +106,8 @@ function makeState(): GameState {
       name: 'Hero',
       className: 'Fighter',
       race: 'Human',
+      background: '',
+      backgroundFact: '',
       level: 1,
       xp: 0,
       hp: 12,
@@ -114,6 +116,7 @@ function makeState(): GameState {
       stats: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
       gold: 10,
       inventory: [],
+      luck: 1,
     },
     world: { theme: 'classic fantasy', location: 'Starting Village', npcs: [], quests: [], facts: [] },
     chronicle: { storySoFar: '', chapters: [], lastSummarizedIndex: 0 },
@@ -128,6 +131,7 @@ function makeCallbacks(): ControllerCallbacks {
     onDiceRoll: vi.fn(),
     onBusyChange: vi.fn(),
     onSystemNote: vi.fn(),
+    onRollPrompt: vi.fn(),
   };
 }
 
@@ -207,12 +211,14 @@ describe('GameController chronicle + session rotation', () => {
     expect(sessions[0].endCount).toBe(1);
     expect(sessions[1].startCount).toBe(1);
 
-    // Next action goes to the NEW session, prefixed with the brief, ending with the player's text.
+    // Next action goes to the NEW session, prefixed with the brief; the player's
+    // text sits before the wire-only mechanics reminder that ends the message.
     controller.submitPlayerAction('I continue on my way.');
     expect(sessions[1].sentMessages).toHaveLength(1);
     const sentToNewSession = sessions[1].sentMessages[0];
     expect(sentToNewSession.startsWith('[CAMPAIGN BRIEFING')).toBe(true);
-    expect(sentToNewSession.endsWith('I continue on my way.')).toBe(true);
+    expect(sentToNewSession).toContain('I continue on my way.');
+    expect(sentToNewSession.endsWith('</system-reminder>')).toBe(true);
     expect(sentToNewSession).toContain('[The player now acts:]\nI continue on my way.');
 
     // Story log + transcript only ever recorded the player's own text, never the brief.
@@ -371,7 +377,8 @@ describe('GameController chronicle + session rotation', () => {
     // prefixed with the brief exactly like a normal post-rotation action.
     expect(sessions[1].sentMessages).toHaveLength(1);
     expect(sessions[1].sentMessages[0].startsWith('[CAMPAIGN BRIEFING')).toBe(true);
-    expect(sessions[1].sentMessages[0].endsWith('I act during the swap.')).toBe(true);
+    expect(sessions[1].sentMessages[0]).toContain('I act during the swap.');
+    expect(sessions[1].sentMessages[0].endsWith('</system-reminder>')).toBe(true);
 
     // And it was still recorded as ordinary player story/transcript text.
     const playerStoryEntries = vi

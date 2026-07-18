@@ -12,12 +12,13 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { Box, Text, useStdout } from 'ink';
 import type { GameState } from '../game/state';
 import { GameController } from '../game/controller';
-import type { StoryEntry } from '../game/controller';
+import type { PendingRollRequest, StoryEntry } from '../game/controller';
 import { loadGame } from '../game/saves';
 import { Menu } from './Menu';
 import { StoryLog } from './StoryLog';
 import { Sidebar } from './Sidebar';
 import { DiceLine } from './DiceLine';
+import { RollPrompt } from './RollPrompt';
 import { InputBar } from './InputBar';
 import { Wizard } from './wizard/Wizard';
 import { formatHelp, formatCharacterSheet, formatJournal, unknownCommandNote } from './slashCommands';
@@ -28,6 +29,13 @@ type GameStartMode = 'new' | 'resume' | 'new-hero';
 const MIN_COLUMNS = 80;
 const MIN_ROWS = 20;
 const SIDEBAR_WIDTH = 34;
+// Fixed rows for the areas below the story log, so the story viewport's
+// height (and therefore the whole frame's total height) is exact and never
+// shifts: a 2-row dice/roll-prompt area (DiceLine is 1 line; RollPrompt's
+// luck-offer line uses the 2nd) plus InputBar's 3-row bordered box (top
+// border + content + bottom border).
+const DICE_AREA_HEIGHT = 2;
+const INPUT_BAR_HEIGHT = 3;
 
 function readDimensions(stdout: NodeJS.WriteStream): { columns: number; rows: number } {
   // `||` not `??`: some ptys (CI, `script`) report 0×0, which would otherwise
@@ -65,6 +73,7 @@ export function App({ debug = false }: AppProps = {}) {
   const [partial, setPartial] = useState('');
   const [busy, setBusy] = useState(false);
   const [diceMessage, setDiceMessage] = useState('');
+  const [pendingRoll, setPendingRoll] = useState<PendingRollRequest | null>(null);
   // GameState is mutated in place by the Engine, so its object reference never
   // changes -- this counter is the only thing that forces Sidebar to re-render
   // with fresh values after onStateChange fires.
@@ -89,6 +98,7 @@ export function App({ debug = false }: AppProps = {}) {
     setEntries([]);
     setPartial('');
     setDiceMessage('');
+    setPendingRoll(null);
     setBusy(false);
     systemIdRef.current = 0;
 
@@ -104,6 +114,7 @@ export function App({ debug = false }: AppProps = {}) {
         onDiceRoll: (message) => setDiceMessage(message),
         onBusyChange: (b) => setBusy(b),
         onSystemNote: (note) => appendSystemEntry(note),
+        onRollPrompt: (request) => setPendingRoll(request),
       },
       { debug },
     );
@@ -207,13 +218,31 @@ export function App({ debug = false }: AppProps = {}) {
     return <Text>Loading…</Text>;
   }
 
+  // Explicit widths on BOTH columns (not flexGrow) so a long streaming line
+  // can never squeeze the sidebar narrower; explicit story height so the
+  // whole frame's total height is exactly dimensions.rows, always -- see the
+  // DICE_AREA_HEIGHT/INPUT_BAR_HEIGHT comment above.
+  const storyWidth = dimensions.columns - SIDEBAR_WIDTH;
+  const storyHeight = Math.max(1, dimensions.rows - DICE_AREA_HEIGHT - INPUT_BAR_HEIGHT);
+
   return (
     <Box flexDirection="row" height={dimensions.rows}>
-      <Box flexDirection="column" flexGrow={1}>
-        <StoryLog entries={entries} partial={partial} />
-        <DiceLine message={diceMessage} />
+      <Box flexDirection="column" width={storyWidth} height={dimensions.rows}>
+        <StoryLog entries={entries} partial={partial} width={storyWidth} height={storyHeight} inputActive={!busy} />
+        <Box flexDirection="column" height={DICE_AREA_HEIGHT}>
+          {pendingRoll ? (
+            <RollPrompt
+              request={pendingRoll}
+              onConfirm={() => controller.confirmRoll()}
+              onResolveLuck={(useLuck) => controller.resolvePendingRoll(useLuck)}
+            />
+          ) : (
+            <DiceLine message={diceMessage} />
+          )}
+        </Box>
         <InputBar
           busy={busy}
+          rollPending={pendingRoll !== null}
           onSubmit={handleSubmit}
           onInterrupt={() => {
             void controller.interrupt();

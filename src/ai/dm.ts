@@ -11,6 +11,7 @@ import type {
   Query,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import { loadSettings, resolveModelOption } from '../game/settings';
 
 export type DmErrorKind = 'auth' | 'rate_limit' | 'unknown';
 
@@ -117,6 +118,17 @@ export class DmSession {
   }
 
   start(): void {
+    // config.model (campaign.modelOverride) wins when a campaign explicitly
+    // pins one; otherwise fall back to the player's global settings.json
+    // (dmModel: 'default' | 'haiku' | 'sonnet' | 'opus', 'default' meaning
+    // "omit the option entirely, use the Claude Code default").
+    let model = this.config.model;
+    if (model === undefined) {
+      const { settings, warning } = loadSettings();
+      if (warning) this.callbacks.onSystemNote?.(warning);
+      model = resolveModelOption(settings.dmModel);
+    }
+
     const options: Options = {
       settingSources: [],
       tools: [],
@@ -125,7 +137,7 @@ export class DmSession {
       includePartialMessages: true,
       systemPrompt: this.config.systemPrompt,
       maxTurns: this.config.maxTurnsPerMessage ?? DEFAULT_MAX_TURNS_PER_MESSAGE,
-      ...(this.config.model !== undefined ? { model: this.config.model } : {}),
+      ...(model !== undefined ? { model } : {}),
     };
 
     try {

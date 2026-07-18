@@ -73,15 +73,34 @@ function writeJsonAtomic(filePath: string, data: unknown): void {
   fs.renameSync(tmpPath, filePath);
 }
 
-function readJson<T>(filePath: string): T {
+/**
+ * Reads one save file's envelope. A schemaVersion NEWER than this build
+ * understands is a hard error (nothing we can do); OLDER runs through
+ * `migrate` (defaulting to an identity pass-through) so a save written by an
+ * earlier version of the game keeps loading instead of throwing.
+ */
+function readJson<T>(filePath: string, migrate: (data: unknown, fromVersion: number) => T = (data) => data as T): T {
   const raw = fs.readFileSync(filePath, 'utf8');
   const envelope = envelopeSchema.parse(JSON.parse(raw));
-  if (envelope.schemaVersion !== SCHEMA_VERSION) {
+  if (envelope.schemaVersion > SCHEMA_VERSION) {
     throw new Error(
       `Schema version mismatch in ${filePath}: found ${envelope.schemaVersion}, expected ${SCHEMA_VERSION}.`,
     );
   }
-  return envelope.data as T;
+  return migrate(envelope.data, envelope.schemaVersion);
+}
+
+// v1 -> v2: Character gained `luck` (default 1) and `background`/`backgroundFact`
+// (default ''). campaign/world/chronicle shapes are unchanged across v1 -> v2,
+// so they use readJson's identity-migrate default.
+function migrateCharacter(data: unknown, fromVersion: number): Character {
+  const character = data as Character;
+  if (fromVersion < 2) {
+    if (typeof character.luck !== 'number') character.luck = 1;
+    if (typeof character.background !== 'string') character.background = '';
+    if (typeof character.backgroundFact !== 'string') character.backgroundFact = '';
+  }
+  return character;
 }
 
 export function saveGame(state: GameState, baseDir: string = defaultBaseDir()): void {
@@ -97,7 +116,7 @@ export function loadGame(slug: string, baseDir: string = defaultBaseDir()): Game
   const paths = savePaths(baseDir, slug);
   return {
     campaign: readJson<Campaign>(paths.campaign),
-    character: readJson<Character>(paths.character),
+    character: readJson<Character>(paths.character, migrateCharacter),
     world: readJson<World>(paths.world),
     chronicle: readJson<Chronicle>(paths.chronicle),
   };

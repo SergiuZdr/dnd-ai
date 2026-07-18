@@ -6,11 +6,12 @@
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { TranscriptEntry } from '../game/saves';
+import { loadSettings, resolveModelOption } from '../game/settings';
 
 export interface SummarizeInput {
   chunk: TranscriptEntry[];
   storySoFar: string;
-  /** Cheap-model override. Default 'haiku'. */
+  /** Cheap-model override. Defaults to settings.json's summarizerModel (itself 'haiku' by default). */
   model?: string;
 }
 
@@ -19,7 +20,6 @@ export interface SummarizeOutput {
   storySoFar: string;
 }
 
-const DEFAULT_SUMMARIZER_MODEL = 'haiku';
 const CHAPTER_MARKER = 'CHAPTER SUMMARY:';
 const STORY_MARKER = 'STORY SO FAR:';
 
@@ -101,6 +101,10 @@ export function parseSummarizerReply(text: string, fallbackStorySoFar: string): 
 
 export async function summarizeChunk(input: SummarizeInput): Promise<SummarizeOutput> {
   const prompt = buildSummarizerPrompt(input.chunk, input.storySoFar);
+  // No onSystemNote-equivalent channel here -- a malformed settings.json is
+  // already surfaced once via DmSession.start()'s warning, so this silently
+  // falls back rather than repeating the same note on every chronicle update.
+  const model = input.model ?? resolveModelOption(loadSettings().settings.summarizerModel);
 
   const q = query({
     prompt,
@@ -108,7 +112,7 @@ export async function summarizeChunk(input: SummarizeInput): Promise<SummarizeOu
       settingSources: [],
       tools: [],
       maxTurns: 1,
-      model: input.model ?? DEFAULT_SUMMARIZER_MODEL,
+      ...(model !== undefined ? { model } : {}),
     },
   });
 

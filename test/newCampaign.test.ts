@@ -6,8 +6,10 @@ import {
   CLASS_PRESETS,
   RACES,
   THEMES,
+  BACKGROUNDS,
   STANDARD_ARRAY,
   assignStats,
+  applyRaceBonuses,
   roll4d6DropLowest,
   createNewCampaign,
   createNewHero,
@@ -87,13 +89,34 @@ describe('CLASS_PRESETS', () => {
       ['bard', 'cleric', 'fighter', 'ranger', 'rogue', 'wizard'].sort(),
     );
   });
+
+  it('gives every class a non-empty tagline for the wizard tooltip', () => {
+    for (const preset of CLASS_PRESETS) {
+      expect(preset.tagline.length).toBeGreaterThan(0);
+    }
+  });
 });
 
 describe('RACES / THEMES', () => {
-  it('lists at least the 6 documented races', () => {
-    expect(RACES).toEqual(
+  it('lists at least the 4 documented races by name', () => {
+    expect(RACES.map((r) => r.name)).toEqual(
       expect.arrayContaining(['Human', 'Elf', 'Dwarf', 'Halfling', 'Half-Orc', 'Tiefling']),
     );
+  });
+
+  it('gives every race a non-empty tooltip description and at least one stat bonus', () => {
+    for (const race of RACES) {
+      expect(race.description.length).toBeGreaterThan(0);
+      expect(Object.keys(race.bonuses).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('matches the documented bonus package for each of the four anchor races', () => {
+    const byName = Object.fromEntries(RACES.map((r) => [r.name, r]));
+    expect(byName.Human.bonuses).toEqual({ str: 1, dex: 1, con: 1, int: 1, wis: 1, cha: 1 });
+    expect(byName.Elf.bonuses).toEqual({ dex: 2, wis: 1 });
+    expect(byName.Dwarf.bonuses).toEqual({ con: 2, str: 1 });
+    expect(byName.Halfling.bonuses).toEqual({ dex: 2, cha: 1 });
   });
 
   it('includes classic/grim/whimsical/custom themes with matching seeds', () => {
@@ -102,6 +125,47 @@ describe('RACES / THEMES', () => {
     expect(byId.grim.seed).toBe('grim dark low-fantasy');
     expect(byId.whimsical.seed).toBe('whimsical lighthearted fairytale');
     expect(byId.custom.seed).toBe('');
+  });
+});
+
+describe('applyRaceBonuses', () => {
+  const baseStats = { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 };
+
+  it('adds the matching race bonuses on top of base stats, leaving unlisted stats untouched', () => {
+    expect(applyRaceBonuses(baseStats, 'Elf')).toEqual({ str: 10, dex: 12, con: 10, int: 10, wis: 11, cha: 10 });
+    expect(applyRaceBonuses(baseStats, 'Dwarf')).toEqual({ str: 11, dex: 10, con: 12, int: 10, wis: 10, cha: 10 });
+  });
+
+  it('applies +1 to every stat for Human', () => {
+    expect(applyRaceBonuses(baseStats, 'Human')).toEqual({ str: 11, dex: 11, con: 11, int: 11, wis: 11, cha: 11 });
+  });
+
+  it('is a no-op for an unrecognized race name, and does not mutate the input', () => {
+    const copy = { ...baseStats };
+    expect(applyRaceBonuses(baseStats, 'Dragonborn')).toEqual(baseStats);
+    expect(baseStats).toEqual(copy);
+  });
+});
+
+describe('BACKGROUNDS', () => {
+  it('lists the 5 documented backgrounds, each with a fact for the DM', () => {
+    expect(BACKGROUNDS.map((b) => b.id).sort()).toEqual(
+      ['acolyte', 'outlaw', 'scholar', 'soldier', 'wanderer'].sort(),
+    );
+    for (const background of BACKGROUNDS) {
+      expect(background.fact.length).toBeGreaterThan(0);
+      expect(background.description.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('grants exactly the documented mechanical extras', () => {
+    const byId = Object.fromEntries(BACKGROUNDS.map((b) => [b.id, b]));
+    expect(byId.soldier.item).toEqual({ name: 'Old Service Blade', qty: 1 });
+    expect(byId.scholar.item).toBeUndefined();
+    expect(byId.scholar.gold).toBeUndefined();
+    expect(byId.outlaw.gold).toBe(10);
+    expect(byId.acolyte.item).toEqual({ name: 'Healing Draught', qty: 1 });
+    expect(byId.wanderer.item).toEqual({ name: "Traveler's Kit", qty: 1 });
   });
 });
 
@@ -116,7 +180,7 @@ describe('createNewCampaign', () => {
     fs.rmSync(baseDir, { recursive: true, force: true });
   });
 
-  it('computes maxHp/hp/ac from the class base plus ability mods', () => {
+  it('computes maxHp/hp/ac from the class base plus ability mods, on top of the racial bonus', () => {
     const state = createNewCampaign(
       {
         name: 'Test Campaign',
@@ -129,10 +193,11 @@ describe('createNewCampaign', () => {
       baseDir,
     );
 
-    // Fighter priority str,con,dex,int,wis,cha -> str15,con14,dex13,int12,wis10,cha8
-    expect(state.character.stats).toEqual({ str: 15, con: 14, dex: 13, int: 12, wis: 10, cha: 8 });
-    const conMod = abilityMod(14);
-    const dexMod = abilityMod(13);
+    // Fighter priority str,con,dex,int,wis,cha -> base str15,con14,dex13,int12,wis10,cha8;
+    // Human's +1-to-everything lands on top of that.
+    expect(state.character.stats).toEqual({ str: 16, con: 15, dex: 14, int: 13, wis: 11, cha: 9 });
+    const conMod = abilityMod(15);
+    const dexMod = abilityMod(14);
     expect(state.character.maxHp).toBe(10 + conMod);
     expect(state.character.hp).toBe(state.character.maxHp);
     expect(state.character.ac).toBe(16 + Math.max(0, Math.min(2, dexMod)));
@@ -169,7 +234,8 @@ describe('createNewCampaign', () => {
       },
       baseDir,
     );
-    expect(state.character.stats.dex).toBe(20); // abilityMod(20) = +5, would blow past the +2 cap
+    // base dex 20 + Elf's +2 DEX = 22; abilityMod(22) = +6, would blow way past the +2 cap either way.
+    expect(state.character.stats.dex).toBe(22);
     expect(state.character.ac).toBe(16 + 2);
   });
 
@@ -303,6 +369,95 @@ describe('createNewCampaign', () => {
       ),
     ).toThrow('necromancer');
   });
+
+  it('leaves background/backgroundFact empty and gold at the base 15 when no backgroundId is given', () => {
+    const state = createNewCampaign(
+      {
+        name: 'No Background',
+        heroName: 'Hero',
+        classId: 'fighter',
+        race: 'Human',
+        statValues: STANDARD_ARRAY,
+        themeSeed: 'classic high fantasy',
+      },
+      baseDir,
+    );
+    expect(state.character.background).toBe('');
+    expect(state.character.backgroundFact).toBe('');
+    expect(state.character.gold).toBe(15);
+  });
+
+  it('grants a background item on top of the class kit, and records the name + fact', () => {
+    const state = createNewCampaign(
+      {
+        name: 'Blade Bearer',
+        heroName: 'Marta',
+        classId: 'wizard', // starter kit has no weapon -- makes the granted item unambiguous
+        race: 'Human',
+        backgroundId: 'soldier',
+        statValues: STANDARD_ARRAY,
+        themeSeed: 'classic high fantasy',
+      },
+      baseDir,
+    );
+    expect(state.character.background).toBe('Soldier');
+    expect(state.character.backgroundFact.length).toBeGreaterThan(0);
+    expect(state.character.inventory).toEqual(
+      expect.arrayContaining([{ name: 'Old Service Blade', qty: 1 }]),
+    );
+    // Class starter items are still present alongside the granted one.
+    expect(state.character.inventory.length).toBe(3); // Staff, Spellbook, Old Service Blade
+  });
+
+  it('grants background gold on top of the base 15', () => {
+    const state = createNewCampaign(
+      {
+        name: 'Ill Gotten',
+        heroName: 'Rook',
+        classId: 'rogue',
+        race: 'Human',
+        backgroundId: 'outlaw',
+        statValues: STANDARD_ARRAY,
+        themeSeed: 'grim dark low-fantasy',
+      },
+      baseDir,
+    );
+    expect(state.character.gold).toBe(25); // 15 base + 10 outlaw
+  });
+
+  it('grants a fact-only background (no item, no gold) without touching inventory/gold', () => {
+    const state = createNewCampaign(
+      {
+        name: 'Book Learned',
+        heroName: 'Sage',
+        classId: 'wizard',
+        race: 'Human',
+        backgroundId: 'scholar',
+        statValues: STANDARD_ARRAY,
+        themeSeed: 'classic high fantasy',
+      },
+      baseDir,
+    );
+    expect(state.character.background).toBe('Scholar');
+    expect(state.character.backgroundFact.length).toBeGreaterThan(0);
+    expect(state.character.gold).toBe(15);
+    expect(state.character.inventory.length).toBe(2); // just the wizard's Staff + Spellbook
+  });
+
+  it('every new character starts with 1 luck', () => {
+    const state = createNewCampaign(
+      {
+        name: 'Lucky Start',
+        heroName: 'Hero',
+        classId: 'fighter',
+        race: 'Human',
+        statValues: STANDARD_ARRAY,
+        themeSeed: 'classic high fantasy',
+      },
+      baseDir,
+    );
+    expect(state.character.luck).toBe(1);
+  });
 });
 
 describe('createNewHero', () => {
@@ -329,6 +484,8 @@ describe('createNewHero', () => {
         name: 'Fallen Hero',
         className: 'Fighter',
         race: 'Human',
+        background: 'Soldier',
+        backgroundFact: 'served as a soldier before taking up adventuring',
         level: 5,
         xp: 6500,
         hp: 0,
@@ -337,6 +494,7 @@ describe('createNewHero', () => {
         stats: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
         gold: 200,
         inventory: [{ name: 'Sword', qty: 1 }],
+        luck: 3,
       },
       world: {
         theme: 'grim dark low-fantasy',

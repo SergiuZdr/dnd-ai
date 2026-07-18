@@ -16,8 +16,22 @@ export const SLASH_COMMANDS: ReadonlyArray<{ cmd: string; desc: string }> = [
   { cmd: '/help', desc: 'Show this list of commands.' },
 ];
 
+export const KEY_HELP: ReadonlyArray<{ keys: string; desc: string }> = [
+  { keys: 'PgUp / PgDn', desc: 'Scroll the story log up/down by half a screen.' },
+  { keys: '[ / ]', desc: 'Same as PgUp/PgDn (works while the DM is narrating; disabled while you\'re typing so brackets type normally).' },
+  { keys: 'SPACE or Enter', desc: 'Roll the dice when a roll is waiting on you.' },
+  { keys: 'L', desc: 'Spend 1 luck to reroll (only offered after a failed roll, if you have luck left).' },
+  { keys: 'Esc', desc: "Interrupt the DM mid-turn (does nothing while a roll is pending — it won't cancel your roll)." },
+];
+
 export function formatHelp(): string {
-  return ['Commands:', ...SLASH_COMMANDS.map(({ cmd, desc }) => `  ${cmd} — ${desc}`)].join('\n');
+  return [
+    'Commands:',
+    ...SLASH_COMMANDS.map(({ cmd, desc }) => `  ${cmd} — ${desc}`),
+    '',
+    'Keys:',
+    ...KEY_HELP.map(({ keys, desc }) => `  ${keys} — ${desc}`),
+  ].join('\n');
 }
 
 export function formatCharacterSheet(state: GameState): string {
@@ -41,11 +55,12 @@ export function formatCharacterSheet(state: GameState): string {
 
   return [
     `${character.name} — ${character.race} ${character.className}, Level ${character.level}`,
+    ...(character.background ? [`Background: ${character.background}`] : []),
     `XP: ${xpText}`,
     `HP: ${character.hp}/${character.maxHp}  AC: ${character.ac}`,
     `STR ${character.stats.str}  DEX ${character.stats.dex}  CON ${character.stats.con}  ` +
       `INT ${character.stats.int}  WIS ${character.stats.wis}  CHA ${character.stats.cha}`,
-    `Gold: ${character.gold}`,
+    `Gold: ${character.gold}  ✦ Luck: ${character.luck}`,
     '',
     'Inventory:',
     inventoryLines,

@@ -20,8 +20,11 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { GameState } from './state';
 import { Engine } from './engine';
+import type { EngineResult } from './engine';
+import type { RollResult } from './dice';
 import { createDmTools } from '../ai/tools';
-import { dmSystemPrompt, buildOpeningPrompt, buildContextBrief, buildNewHeroPrompt } from '../ai/prompts';
+import type { InteractiveRollRequest } from '../ai/tools';
+import { dmSystemPrompt, buildOpeningPrompt, buildContextBrief, buildNewHeroPrompt, withMechanicsReminder } from '../ai/prompts';
 import { DmSession } from '../ai/dm';
 import type { DmError, DmSessionCallbacks, DmSessionConfig } from '../ai/dm';
 import { summarizeChunk } from '../ai/summarizer';
@@ -32,6 +35,18 @@ export interface StoryEntry {
   id: number;
   kind: 'player' | 'dm' | 'system';
   text: string;
+}
+
+/** A player-triggered dice roll awaiting SPACE/Enter in the UI. Mirrors InteractiveRollRequest (ai/tools.ts) minus nothing -- kept as a separate type so the UI layer never has to import from ai/. */
+export type PendingRollRequest = InteractiveRollRequest;
+
+/** What confirmRoll() hands back to the UI once the (real, engine-rolled) result is in. */
+export interface RollRevealResult {
+  message: string;
+  /** True when the roll failed its dc and the hero still has luck to spend on a reroll. */
+  canReroll: boolean;
+  /** Current luck count, for the "✦ Luck N — press L to reroll" prompt text. */
+  luck: number;
 }
 
 export interface ControllerCallbacks {
@@ -45,6 +60,8 @@ export interface ControllerCallbacks {
   onBusyChange: (busy: boolean) => void;
   /** Friendly errors, rate-limit notes, interrupt confirmations. */
   onSystemNote: (note: string) => void;
+  /** A player roll is awaiting SPACE/Enter (request), or has just been resolved/cancelled (null). */
+  onRollPrompt: (request: PendingRollRequest | null) => void;
 }
 
 /**
@@ -65,7 +82,7 @@ export interface GameControllerOptions {
   summarizeThresholdChars?: number;
   /** Entry-count threshold (player+dm only) for the un-summarized tail. Default 40. */
   summarizeThresholdEntries?: number;
-  /** Cheap-model override for the summarizer. Default 'haiku'. */
+  /** Cheap-model override for the summarizer. Default: read from settings.json (see src/game/settings.ts), itself 'haiku' unless configured. */
   summarizerModel?: string;
   /** Test seam: replaces `new DmSession(...)`. Defaults to constructing a real DmSession. */
   sessionFactory?: (config: DmSessionConfig, callbacks: DmSessionCallbacks) => DmSessionLike;
@@ -76,10 +93,14 @@ export interface GameControllerOptions {
 }
 
 const SAVE_DEBOUNCE_MS = 300;
-const STREAM_THROTTLE_MS = 50;
+// Stream-delta batching interval: how often onStreamText re-renders the
+// in-flight DM turn. Raised from 50ms -- 80ms is still imperceptible as
+// narration but roughly halves React/ink re-render churn during long turns.
+// handleTurnComplete() always flushes/clears immediately on completion
+// (bypassing this throttle entirely), so no trailing text is ever lost.
+const STREAM_THROTTLE_MS = 80;
 const DEFAULT_SUMMARIZE_THRESHOLD_CHARS = 24000;
 const DEFAULT_SUMMARIZE_THRESHOLD_ENTRIES = 40;
-const DEFAULT_SUMMARIZER_MODEL = 'haiku';
 
 /**
  * Pure threshold check: does the un-summarized tail of the transcript
@@ -108,7 +129,8 @@ export class GameController {
 
   private readonly summarizeThresholdChars: number;
   private readonly summarizeThresholdEntries: number;
-  private readonly summarizerModel: string;
+  /** undefined -> summarizeChunk() falls back to settings.json itself; see GameControllerOptions.summarizerModel. */
+  private readonly summarizerModel: string | undefined;
   private readonly sessionFactory: (config: DmSessionConfig, callbacks: DmSessionCallbacks) => DmSessionLike;
   private readonly summarizeFn: typeof summarizeChunk;
   private readonly debug: boolean;
@@ -143,13 +165,23 @@ export class GameController {
   /** Drained every time the active session goes idle (turn complete or error). */
   private idleWaiters: Array<() => void> = [];
 
+  // -- Interactive player dice rolls --------------------------------------
+  /** Non-undefined for the whole life of one roll_dice(roller:'player') tool call: from the UI prompt through confirm/reroll to resolution. */
+  private pendingRoll?: {
+    request: PendingRollRequest;
+    resolve: (result: EngineResult) => void;
+    /** Set once confirmRoll() has executed the real roll; undefined while still waiting on SPACE/Enter. */
+    firstRoll?: RollResult;
+    firstMessage?: string;
+  };
+
   constructor(state: GameState, cb: ControllerCallbacks, opts?: GameControllerOptions) {
     this.state = state;
     this.cb = cb;
     this.baseDir = opts?.baseDir;
     this.summarizeThresholdChars = opts?.summarizeThresholdChars ?? DEFAULT_SUMMARIZE_THRESHOLD_CHARS;
     this.summarizeThresholdEntries = opts?.summarizeThresholdEntries ?? DEFAULT_SUMMARIZE_THRESHOLD_ENTRIES;
-    this.summarizerModel = opts?.summarizerModel ?? DEFAULT_SUMMARIZER_MODEL;
+    this.summarizerModel = opts?.summarizerModel;
     this.sessionFactory = opts?.sessionFactory ?? ((config, callbacks) => new DmSession(config, callbacks));
     this.summarizeFn = opts?.summarizeFn ?? summarizeChunk;
     this.debug = opts?.debug ?? false;
@@ -177,6 +209,7 @@ export class GameController {
         }
         this.cb.onToolActivity?.(name);
       },
+      interactiveRoll: (request) => this.handleInteractiveRoll(request),
     });
 
     this.sessionConfig = {
@@ -227,24 +260,79 @@ export class GameController {
     );
     this.setBusy(true);
 
+    // Wire-only wrapper: transcript and story log above got the clean text;
+    // only the DM session sees the trailing mechanics reminder.
+    const wire = withMechanicsReminder(trimmed);
+
     if (this.swapping) {
       // Old session already ended, the fresh one isn't up yet -- hold the
       // one slot; runChronicleUpdate() flushes it once rotation finishes.
-      this.queuedAction = trimmed;
+      this.queuedAction = wire;
       return;
     }
 
-    this.sendToSession(trimmed);
+    this.sendToSession(wire);
   }
 
   async interrupt(): Promise<void> {
     if (!this.session) return;
     await this.session.interrupt();
+    this.clearPendingRollOnAbort();
     this.cancelStreamThrottle();
     this.streamBuffer = '';
     this.cb.onStreamText('');
     this.setBusy(false);
     this.cb.onSystemNote('Interrupted.');
+  }
+
+  /**
+   * Called by the UI once the player confirms a pending roll (SPACE/Enter,
+   * after its local ~700ms cycling-die animation). Executes the real engine
+   * roll and returns the reveal info. If the roll failed its dc and the hero
+   * has luck left, the underlying tool-call promise is deliberately NOT
+   * resolved yet (canReroll: true) -- the UI must follow up with
+   * resolvePendingRoll(); otherwise this has already resolved it and the
+   * pending roll is cleared (canReroll: false).
+   * Returns undefined only when there was no pending roll to confirm, or the
+   * dice expression itself was invalid (a DM bug) -- in the latter case the
+   * pending roll is still resolved-with-error and cleared, no UI action needed.
+   */
+  confirmRoll(): RollRevealResult | undefined {
+    const pending = this.pendingRoll;
+    if (!pending || !this.engine) return undefined;
+    const { request } = pending;
+    const result = this.engine.rollDice(request.expr, request.mode, request.reason, request.dc);
+    if (!result.ok) {
+      this.finishPendingRoll(result);
+      return undefined;
+    }
+    const character = this.engine.state.character;
+    const failedDc = request.dc !== undefined && result.roll.total < request.dc;
+    const canReroll = failedDc && character.luck > 0;
+    if (canReroll) {
+      pending.firstRoll = result.roll;
+      pending.firstMessage = result.message;
+    } else {
+      this.finishPendingRoll(result);
+    }
+    return { message: result.message, canReroll, luck: character.luck };
+  }
+
+  /**
+   * Called by the UI after a confirmRoll() reveal with canReroll: true.
+   * useLuck true = player pressed L (spend 1 luck, keep the better of the two
+   * totals); false = accept the original roll as-is (Enter or anything else).
+   * No-op if there's no roll awaiting a luck decision.
+   */
+  resolvePendingRoll(useLuck: boolean): void {
+    const pending = this.pendingRoll;
+    if (!pending || !this.engine || !pending.firstRoll || pending.firstMessage === undefined) return;
+    if (!useLuck) {
+      this.finishPendingRoll({ ok: true, message: pending.firstMessage, events: [] });
+      return;
+    }
+    const result = this.engine.rerollWithLuck(pending.firstRoll, pending.request.reason, pending.request.dc);
+    this.finishPendingRoll(result);
   }
 
   /**
@@ -284,6 +372,37 @@ export class GameController {
   private setBusy(busy: boolean): void {
     this.busy = busy;
     this.cb.onBusyChange(busy);
+  }
+
+  /** The ToolHooks.interactiveRoll implementation: parks the tool call's promise until confirmRoll()/resolvePendingRoll() settles it. */
+  private handleInteractiveRoll(request: PendingRollRequest): Promise<EngineResult> {
+    return new Promise((resolve) => {
+      this.pendingRoll = { request, resolve };
+      this.cb.onRollPrompt(request);
+    });
+  }
+
+  /** Clears the pending roll and resolves its awaited promise -- the one path that actually completes the roll_dice tool call. */
+  private finishPendingRoll(result: EngineResult): void {
+    const pending = this.pendingRoll;
+    if (!pending) return;
+    this.pendingRoll = undefined;
+    this.cb.onRollPrompt(null);
+    pending.resolve(result);
+  }
+
+  /**
+   * Drops any pending roll WITHOUT resolving its promise -- used when the DM
+   * session itself is being interrupted or has errored, so the abandoned
+   * tool call's continuation (which would fire onToolResult/onDiceRoll for a
+   * turn the UI has already moved past) simply never runs. The promise is
+   * left permanently unsettled, which is safe: nothing awaits it once the
+   * owning query has been torn down.
+   */
+  private clearPendingRollOnAbort(): void {
+    if (!this.pendingRoll) return;
+    this.pendingRoll = undefined;
+    this.cb.onRollPrompt(null);
   }
 
   private handleDelta(text: string): void {
@@ -340,6 +459,7 @@ export class GameController {
   }
 
   private handleError(err: DmError): void {
+    this.clearPendingRollOnAbort();
     this.cb.onSystemNote(err.friendly);
     this.setBusy(false);
     this.notifyIdle();
