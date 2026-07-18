@@ -27,6 +27,8 @@ function makeState(slug: string, name: string): GameState {
       name: 'Hero',
       className: 'Fighter',
       race: 'Human',
+      background: 'Wanderer',
+      backgroundFact: "has wandered many roads before this one",
       level: 1,
       xp: 0,
       hp: 12,
@@ -35,6 +37,7 @@ function makeState(slug: string, name: string): GameState {
       stats: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
       gold: 10,
       inventory: [{ name: 'Rope', qty: 1 }],
+      luck: 1,
     },
     world: {
       theme: 'classic fantasy',
@@ -142,6 +145,113 @@ describe('saves', () => {
       expect(message).toContain(campaignFile);
       expect(message).toContain('99');
       expect(message).toContain(String(SCHEMA_VERSION));
+    });
+  });
+
+  describe('schema migration (v1 -> v2)', () => {
+    /** Writes a hand-built v1 (pre-luck) save: no Character.luck/background/backgroundFact fields. */
+    function writeLegacySave(slug: string, character: Record<string, unknown>): void {
+      const dir = path.join(baseDir, slug);
+      fs.mkdirSync(dir, { recursive: true });
+      const campaign = {
+        slug,
+        name: 'Legacy Save',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        contentRating: 'PG-13',
+      };
+      const world = { theme: 'classic fantasy', location: 'Old Town', npcs: [], quests: [], facts: [] };
+      const chronicle = { storySoFar: '', chapters: [], lastSummarizedIndex: 0 };
+      fs.writeFileSync(path.join(dir, 'campaign.json'), JSON.stringify({ schemaVersion: 1, data: campaign }));
+      fs.writeFileSync(path.join(dir, 'character.json'), JSON.stringify({ schemaVersion: 1, data: character }));
+      fs.writeFileSync(path.join(dir, 'world.json'), JSON.stringify({ schemaVersion: 1, data: world }));
+      fs.writeFileSync(path.join(dir, 'chronicle.json'), JSON.stringify({ schemaVersion: 1, data: chronicle }));
+    }
+
+    it('defaults luck to 1 and background/backgroundFact to "" when loading a pre-luck (v1) character save', () => {
+      writeLegacySave('legacy-save', {
+        name: 'Old Hero',
+        className: 'Fighter',
+        race: 'Human',
+        level: 3,
+        xp: 900,
+        hp: 20,
+        maxHp: 20,
+        ac: 16,
+        stats: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
+        gold: 50,
+        inventory: [{ name: 'Sword', qty: 1 }],
+        // no luck / background / backgroundFact -- exactly what a real pre-upgrade save looks like.
+      });
+
+      const loaded = loadGame('legacy-save', baseDir);
+
+      expect(loaded.character.luck).toBe(1);
+      expect(loaded.character.background).toBe('');
+      expect(loaded.character.backgroundFact).toBe('');
+      // Everything else from the old save comes through untouched.
+      expect(loaded.character.name).toBe('Old Hero');
+      expect(loaded.character.level).toBe(3);
+      expect(loaded.character.inventory).toEqual([{ name: 'Sword', qty: 1 }]);
+    });
+
+    it('does not clobber luck/background if a v1 file somehow already had them (defensive, should not happen in practice)', () => {
+      writeLegacySave('legacy-save-with-extras', {
+        name: 'Odd Hero',
+        className: 'Rogue',
+        race: 'Elf',
+        level: 1,
+        xp: 0,
+        hp: 8,
+        maxHp: 8,
+        ac: 14,
+        stats: { str: 8, dex: 16, con: 12, int: 10, wis: 10, cha: 10 },
+        gold: 5,
+        inventory: [],
+        luck: 2,
+        background: 'Scholar',
+        backgroundFact: 'already set',
+      });
+
+      const loaded = loadGame('legacy-save-with-extras', baseDir);
+
+      expect(loaded.character.luck).toBe(2);
+      expect(loaded.character.background).toBe('Scholar');
+      expect(loaded.character.backgroundFact).toBe('already set');
+    });
+
+    it('re-saving a migrated character persists schemaVersion 2 with luck included on disk', () => {
+      writeLegacySave('legacy-resave', {
+        name: 'Old Hero',
+        className: 'Fighter',
+        race: 'Human',
+        level: 1,
+        xp: 0,
+        hp: 12,
+        maxHp: 12,
+        ac: 15,
+        stats: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
+        gold: 10,
+        inventory: [],
+      });
+
+      const loaded = loadGame('legacy-resave', baseDir);
+      saveGame(loaded, baseDir);
+
+      const raw = JSON.parse(fs.readFileSync(path.join(baseDir, 'legacy-resave', 'character.json'), 'utf8'));
+      expect(raw.schemaVersion).toBe(SCHEMA_VERSION);
+      expect(raw.data.luck).toBe(1);
+      expect(raw.data.background).toBe('');
+    });
+
+    it('still throws for a genuinely newer-than-supported schemaVersion (not silently migrated)', () => {
+      writeLegacySave('too-new', { name: 'X' });
+      const characterFile = path.join(baseDir, 'too-new', 'character.json');
+      const raw = JSON.parse(fs.readFileSync(characterFile, 'utf8'));
+      raw.schemaVersion = SCHEMA_VERSION + 1;
+      fs.writeFileSync(characterFile, JSON.stringify(raw));
+
+      expect(() => loadGame('too-new', baseDir)).toThrow(String(SCHEMA_VERSION));
     });
   });
 

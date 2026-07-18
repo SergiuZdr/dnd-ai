@@ -1,25 +1,27 @@
-// Character-creation wizard: name -> hero -> class -> race -> stats -> theme
-// -> content rating -> confirm. Esc on any step goes back one step (menu from
-// the first step); the confirm screen's Esc restarts the wizard from the top
-// instead (its previously-entered answers stay pre-filled, so "restart" means
-// "revisit", not "erase").
+// Character-creation wizard: name -> hero -> class -> race -> background ->
+// stats -> theme -> content rating -> confirm. Esc on any step goes back one
+// step (menu from the first step); the confirm screen's Esc restarts the
+// wizard from the top instead (its previously-entered answers stay
+// pre-filled, so "restart" means "revisit", not "erase").
 //
 // `/retire` reuses this same wizard in mode 'retire': the world already
 // exists, so the campaign-name, theme, and content-rating steps are skipped
 // entirely -- it starts at 'hero' and jumps straight from stats to 'confirm',
-// collecting only a fresh hero (name/class/race/stats) for the same
-// persistent campaign/world/chronicle (see createNewHero).
+// collecting only a fresh hero (name/class/race/background/stats) for the
+// same persistent campaign/world/chronicle (see createNewHero).
 import { useMemo, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import type { GameState } from '../../game/state';
+import type { GameState, Stats } from '../../game/state';
 import {
   CLASS_PRESETS,
   RACES,
+  BACKGROUNDS,
   THEMES,
   STANDARD_ARRAY,
   createNewCampaign,
   createNewHero,
   assignStats,
+  applyRaceBonuses,
 } from '../../game/newCampaign';
 import type { ClassPreset } from '../../game/newCampaign';
 import { saveGame, appendTranscript } from '../../game/saves';
@@ -43,6 +45,7 @@ type Step =
   | 'hero'
   | 'class'
   | 'race'
+  | 'background'
   | 'statsMethod'
   | 'statsRoll'
   | 'theme'
@@ -50,8 +53,17 @@ type Step =
   | 'contentRating'
   | 'confirm';
 
-function describeStarterKit(preset: ClassPreset): string {
-  return preset.starterItems.map((item) => (item.qty > 1 ? `${item.name} ×${item.qty}` : item.name)).join(', ');
+/** "front-line weapon master. d10 HP · STR · Sword, Shield, Chainmail, Rations ×5" */
+function describeClass(preset: ClassPreset): string {
+  const keyStat = preset.statPriority[0].toUpperCase();
+  const kit = preset.starterItems.map((item) => (item.qty > 1 ? `${item.name} ×${item.qty}` : item.name)).join(', ');
+  return `${preset.tagline}. d${preset.hitBase} HP · ${keyStat} · ${kit}`;
+}
+
+function formatStats(stats: Stats): string {
+  return (
+    `STR ${stats.str}  DEX ${stats.dex}  CON ${stats.con}  ` + `INT ${stats.int}  WIS ${stats.wis}  CHA ${stats.cha}`
+  );
 }
 
 function ConfirmPrompt({ onConfirm, onBack }: { onConfirm: () => void; onBack: () => void }) {
@@ -73,6 +85,7 @@ export function Wizard({ mode = 'new', existingState, onCancel, onComplete }: Wi
   const [heroName, setHeroName] = useState('');
   const [classId, setClassId] = useState('');
   const [race, setRace] = useState('');
+  const [backgroundId, setBackgroundId] = useState('');
   const [statValues, setStatValues] = useState<number[]>(STANDARD_ARRAY);
   const [themeSeed, setThemeSeed] = useState('');
   const [themeLabel, setThemeLabel] = useState('');
@@ -89,12 +102,20 @@ export function Wizard({ mode = 'new', existingState, onCancel, onComplete }: Wi
         key: preset.id,
         label: preset.name,
         value: preset.id,
-        description: describeStarterKit(preset),
+        description: describeClass(preset),
       })),
     [],
   );
 
-  const raceOptions = useMemo<SelectOption<string>[]>(() => RACES.map((r) => ({ key: r, label: r, value: r })), []);
+  const raceOptions = useMemo<SelectOption<string>[]>(
+    () => RACES.map((r) => ({ key: r.id, label: r.name, value: r.name, description: r.description })),
+    [],
+  );
+
+  const backgroundOptions = useMemo<SelectOption<string>[]>(
+    () => BACKGROUNDS.map((b) => ({ key: b.id, label: b.name, value: b.id, description: b.description })),
+    [],
+  );
 
   const statsMethodOptions = useMemo<SelectOption<'standard' | 'roll'>[]>(
     () => [
@@ -177,9 +198,26 @@ export function Wizard({ mode = 'new', existingState, onCancel, onComplete }: Wi
               options={raceOptions}
               onSelect={(r) => {
                 setRace(r);
-                setStep('statsMethod');
+                setStep('background');
               }}
               onBack={() => setStep('class')}
+            />
+          </Box>
+        </Box>
+      );
+
+    case 'background':
+      return (
+        <Box flexDirection="column" padding={1}>
+          <Text bold>Choose a background</Text>
+          <Box marginTop={1}>
+            <SelectList
+              options={backgroundOptions}
+              onSelect={(id) => {
+                setBackgroundId(id);
+                setStep('statsMethod');
+              }}
+              onBack={() => setStep('race')}
             />
           </Box>
         </Box>
@@ -200,7 +238,7 @@ export function Wizard({ mode = 'new', existingState, onCancel, onComplete }: Wi
                   setStep('statsRoll');
                 }
               }}
-              onBack={() => setStep('race')}
+              onBack={() => setStep('background')}
             />
           </Box>
         </Box>
@@ -274,7 +312,12 @@ export function Wizard({ mode = 'new', existingState, onCancel, onComplete }: Wi
       );
 
     case 'confirm': {
-      const finalStats = assignStats(statValues, [...statPriority]);
+      // Base = straight off the stat-roll/array step; final = with the
+      // race's bonuses applied on top -- shown side by side so the player
+      // sees exactly what their race added.
+      const baseStats = assignStats(statValues, [...statPriority]);
+      const finalStats = applyRaceBonuses(baseStats, race);
+      const background = BACKGROUNDS.find((b) => b.id === backgroundId);
       const restartStep: Step = isRetire ? 'hero' : 'name';
       return (
         <Box flexDirection="column" padding={1}>
@@ -282,10 +325,9 @@ export function Wizard({ mode = 'new', existingState, onCancel, onComplete }: Wi
           <Box marginTop={1} flexDirection="column">
             <Text>{`Campaign: ${isRetire ? (existingState?.campaign.name ?? '') : name}`}</Text>
             <Text>{`Hero: ${heroName} — ${race} ${classPreset?.name ?? classId}`}</Text>
-            <Text>
-              {`STR ${finalStats.str}  DEX ${finalStats.dex}  CON ${finalStats.con}  ` +
-                `INT ${finalStats.int}  WIS ${finalStats.wis}  CHA ${finalStats.cha}`}
-            </Text>
+            <Text dimColor>{`Base stats:  ${formatStats(baseStats)}`}</Text>
+            <Text>{`Final stats: ${formatStats(finalStats)}`}</Text>
+            {background && <Text>{`Background: ${background.name} — ${background.description}`}</Text>}
             {isRetire ? (
               <Text>{`World: ${existingState?.world.theme ?? ''}`}</Text>
             ) : (
@@ -299,7 +341,7 @@ export function Wizard({ mode = 'new', existingState, onCancel, onComplete }: Wi
             <ConfirmPrompt
               onConfirm={() => {
                 if (isRetire && existingState) {
-                  const state = createNewHero(existingState, { heroName, classId, race, statValues });
+                  const state = createNewHero(existingState, { heroName, classId, race, backgroundId, statValues });
                   saveGame(state);
                   appendTranscript(state.campaign.slug, {
                     role: 'system',
@@ -308,7 +350,16 @@ export function Wizard({ mode = 'new', existingState, onCancel, onComplete }: Wi
                   });
                   onComplete(state);
                 } else {
-                  const state = createNewCampaign({ name, heroName, classId, race, statValues, themeSeed, contentRating });
+                  const state = createNewCampaign({
+                    name,
+                    heroName,
+                    classId,
+                    race,
+                    backgroundId,
+                    statValues,
+                    themeSeed,
+                    contentRating,
+                  });
                   saveGame(state);
                   onComplete(state);
                 }

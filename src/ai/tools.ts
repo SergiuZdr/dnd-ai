@@ -4,12 +4,28 @@
 // translates between the LLM's tool-call args and Engine's EngineResult.
 
 import { tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
-import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
+import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { Engine, EngineResult } from '../game/engine';
+import type { RollMode } from '../game/dice';
+
+export interface InteractiveRollRequest {
+  expr: string;
+  mode?: RollMode;
+  reason: string;
+  dc?: number;
+}
 
 export interface ToolHooks {
   onToolResult?: (toolName: string, result: EngineResult) => void;
+  /**
+   * When present, roll_dice awaits this instead of calling engine.rollDice
+   * directly for roller:'player' rolls -- the controller uses it to pause the
+   * turn, prompt the UI, and resolve once the player has rolled (and possibly
+   * spent luck on a reroll). Absent in headless contexts (smoke scripts,
+   * tests, no UI): those always get the old instant-roll behavior.
+   */
+  interactiveRoll?: (request: InteractiveRollRequest) => Promise<EngineResult>;
 }
 
 const SERVER_NAME = 'dnd';
@@ -34,19 +50,39 @@ function toCallToolResult(result: EngineResult) {
 export function createDmTools(
   engine: Engine,
   hooks?: ToolHooks,
-): { server: McpSdkServerConfigWithInstance; allowedTools: string[]; serverName: 'dnd' } {
+): {
+  server: McpSdkServerConfigWithInstance;
+  allowedTools: string[];
+  serverName: 'dnd';
+  /** Raw tool definitions (handler included) -- exposed mainly so tests can call handlers directly without going through the MCP server. */
+  tools: SdkMcpToolDefinition<any>[];
+} {
   const rollDice = tool(
     'roll_dice',
     'Roll dice to resolve ANY uncertain outcome — attacks, skill checks, saving throws, luck. ' +
       'Call this BEFORE narrating the outcome, never after: the roll decides what happens, ' +
-      'narration follows it. A bad roll means things go badly — never fudge or ignore the result.',
+      'narration follows it. A bad roll means things go badly — never fudge or ignore the result. ' +
+      'Set dc to the target number (meet-or-beat succeeds) whenever the fiction has a difficulty — for ' +
+      "attacks, use the target's effective defense. Set roller:'player' whenever the HERO is the one " +
+      "attacking/checking/saving (this pauses so the player can physically roll); use roller:'dm' (or " +
+      'omit it) for NPC, monster, or world rolls the DM is making on their behalf.',
     {
       expr: z.string().describe('e.g. "d20", "2d6+3"'),
       mode: z.enum(['normal', 'advantage', 'disadvantage']).optional(),
       reason: z.string(),
+      dc: z.number().int().optional().describe('Target number to meet or beat for success, when the fiction calls for one.'),
+      roller: z
+        .enum(['player', 'dm'])
+        .optional()
+        .describe("'player' when the hero attacks/checks/saves; 'dm' for NPC/monster/world rolls."),
     },
-    async ({ expr, mode, reason }) => {
-      const result = engine.rollDice(expr, mode, reason);
+    async ({ expr, mode, reason, dc, roller }) => {
+      if (roller === 'player' && hooks?.interactiveRoll) {
+        const result = await hooks.interactiveRoll({ expr, mode, reason, dc });
+        hooks.onToolResult?.('roll_dice', result);
+        return toCallToolResult(result);
+      }
+      const result = engine.rollDice(expr, mode, reason, dc);
       hooks?.onToolResult?.('roll_dice', result);
       return toCallToolResult(result);
     },
@@ -218,5 +254,5 @@ export function createDmTools(
   const server = createSdkMcpServer({ name: SERVER_NAME, tools });
   const allowedTools = tools.map((t) => `mcp__${SERVER_NAME}__${t.name}`);
 
-  return { server, allowedTools, serverName: SERVER_NAME };
+  return { server, allowedTools, serverName: SERVER_NAME, tools };
 }

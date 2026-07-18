@@ -48,7 +48,10 @@ export function SelectList<T>({ options, onSelect, onBack, hint }: SelectListPro
         {options.map((opt, i) => (
           <Box key={opt.key} flexDirection="column">
             <Text inverse={i === index}>{(i === index ? '> ' : '  ') + opt.label}</Text>
-            {opt.description && <Text dimColor>{`    ${opt.description}`}</Text>}
+            {/* Tooltip: only the focused option's description shows, so a long
+                list of richly-described options (classes/races/backgrounds)
+                stays compact instead of printing every description at once. */}
+            {i === index && opt.description && <Text dimColor>{`    ${opt.description}`}</Text>}
           </Box>
         ))}
       </Box>

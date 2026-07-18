@@ -12,19 +12,67 @@ export type EngineResult =
   | { ok: true; message: string; events: string[] }
   | { ok: false; error: string };
 
+/**
+ * rollDice/rerollWithLuck return this instead of the plain EngineResult: the
+ * `roll` field carries the raw RollResult alongside the formatted message so
+ * a caller orchestrating the interactive player-roll flow (GameController)
+ * can hold onto it for a possible luck reroll without re-rolling (which
+ * would silently produce different numbers than what was already shown).
+ * Structurally assignable to EngineResult wherever the ok branch only reads
+ * message/events, so existing call sites (tools.ts, etc.) need no changes.
+ */
+export type RollEngineResult =
+  | { ok: true; message: string; events: string[]; roll: RollResult }
+  | { ok: false; error: string };
+
+/** +1 luck per level gained, capped at this value. */
+const MAX_LUCK = 3;
+
 function isBoundedInt(n: number, min: number, max: number): boolean {
   return Number.isInteger(n) && n >= min && n <= max;
 }
 
-function formatRollMessage(expr: string, reason: string, result: RollResult): string {
-  const modeSuffix = result.mode === 'normal' ? '' : ` [${result.mode}]`;
+/** `[14, 6]+2 = 22`-style rendering of one RollResult, shared by fresh rolls and reroll segments. */
+function rollSegment(result: RollResult): string {
   const facesText =
     result.mode === 'normal'
       ? `[${result.chosen.join(', ')}]`
       : `attempts ${JSON.stringify(result.attempts)} -> kept [${result.chosen.join(', ')}]`;
   const modifierText =
     result.modifier > 0 ? `+${result.modifier}` : result.modifier < 0 ? `${result.modifier}` : '';
-  return `🎲 ${expr}${modeSuffix} (${reason}) → ${facesText}${modifierText} = ${result.total}`;
+  return `${facesText}${modifierText} = ${result.total}`;
+}
+
+/** ` vs DC 13 — ✓ success` / ` vs DC 13 — ✗ failure`, or '' when dc is absent. */
+function dcSuffix(total: number, dc: number | undefined): string {
+  if (dc === undefined) return '';
+  return total >= dc ? ` vs DC ${dc} — ✓ success` : ` vs DC ${dc} — ✗ failure`;
+}
+
+function formatRollMessage(expr: string, reason: string, result: RollResult, dc: number | undefined): string {
+  const modeSuffix = result.mode === 'normal' ? '' : ` [${result.mode}]`;
+  return `🎲 ${expr}${modeSuffix} (${reason}) → ${rollSegment(result)}${dcSuffix(result.total, dc)}`;
+}
+
+/**
+ * Combines an original roll and a luck-funded reroll into one message,
+ * annotating whichever total is actually kept (the higher of the two) --
+ * not always the reroll, since luck can also come up worse.
+ */
+function formatRerollMessage(
+  expr: string,
+  reason: string,
+  previous: RollResult,
+  rerolled: RollResult,
+  dc: number | undefined,
+): string {
+  const modeSuffix = previous.mode === 'normal' ? '' : ` [${previous.mode}]`;
+  const rerollWon = rerolled.total > previous.total;
+  const combined = rerollWon
+    ? `${rollSegment(previous)}, reroll ${rollSegment(rerolled)} — kept`
+    : `${rollSegment(previous)} — kept, reroll ${rollSegment(rerolled)}`;
+  const kept = rerollWon ? rerolled : previous;
+  return `🎲 ${expr}${modeSuffix} (${reason}) → ${combined} (luck spent)${dcSuffix(kept.total, dc)}`;
 }
 
 export class Engine {
@@ -37,13 +85,34 @@ export class Engine {
     this.onMutation?.(this.state);
   }
 
-  rollDice(expr: string, mode: RollMode | undefined, reason: string): EngineResult {
+  /** dc is the target number (meet-or-beat succeeds); omit it for rolls with no pass/fail stakes. Never mutates state. */
+  rollDice(expr: string, mode: RollMode | undefined, reason: string, dc?: number): RollEngineResult {
     try {
       const result = roll(expr, mode);
-      return { ok: true, message: formatRollMessage(expr, reason, result), events: [] };
+      return { ok: true, message: formatRollMessage(expr, reason, result, dc), events: [], roll: result };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+  }
+
+  /**
+   * Spends 1 luck to reroll the same expr/mode as `previous` (a RollResult
+   * this same Engine already produced via rollDice), keeping whichever total
+   * is better. Unlike rollDice, this DOES mutate state (luck is consumed),
+   * so it calls onMutation on success -- the one deliberate exception to
+   * "rolls never mutate".
+   */
+  rerollWithLuck(previous: RollResult, reason: string, dc?: number): RollEngineResult {
+    const character = this.state.character;
+    if (character.luck <= 0) {
+      return { ok: false, error: `${character.name} has no luck left to spend on a reroll.` };
+    }
+    const rerolled = roll(previous.expr, previous.mode);
+    character.luck -= 1;
+    const kept = rerolled.total > previous.total ? rerolled : previous;
+    const message = formatRerollMessage(previous.expr, reason, previous, rerolled, dc);
+    this.mutate();
+    return { ok: true, message, events: [], roll: kept };
   }
 
   applyDamage(amount: number, reason: string): EngineResult {
@@ -94,6 +163,7 @@ export class Engine {
       character.maxHp += perLevelGain * levelsGained;
       character.hp += perLevelGain * levelsGained;
       character.level = newLevel;
+      character.luck = Math.min(MAX_LUCK, character.luck + levelsGained);
       events.push('level-up');
       message += ` ${character.name} reached level ${newLevel}!`;
     }

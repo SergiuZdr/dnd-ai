@@ -11,7 +11,7 @@ import type { EngineResult } from '../src/game/engine';
 import type { GameState } from '../src/game/state';
 import { saveGame, loadGame } from '../src/game/saves';
 import { createDmTools } from '../src/ai/tools';
-import { dmSystemPrompt, buildOpeningPrompt } from '../src/ai/prompts';
+import { dmSystemPrompt, buildOpeningPrompt, withMechanicsReminder } from '../src/ai/prompts';
 import { DmSession } from '../src/ai/dm';
 import type { DmError } from '../src/ai/dm';
 
@@ -31,6 +31,8 @@ function buildFixtureState(): GameState {
       name: 'Theron',
       className: 'Fighter',
       race: 'Human',
+      background: 'Soldier',
+      backgroundFact: 'served as a soldier before taking up adventuring, and still carries an old service blade from that time',
       level: 1,
       xp: 0,
       hp: 12,
@@ -39,6 +41,7 @@ function buildFixtureState(): GameState {
       stats: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 8 },
       gold: 10,
       inventory: [{ name: 'Dagger', qty: 1 }],
+      luck: 1,
     },
     world: {
       theme: 'classic fantasy',
@@ -76,6 +79,11 @@ async function main(): Promise<void> {
   };
 
   const toolCallCounts: Record<string, number> = {};
+  // Counts roll_dice calls that arrived with roller:'player' — the trigger the
+  // real game's interactive roll button hangs off. The hook resolves rolls
+  // instantly (no UI here), but its mere invocation proves the DM model emits
+  // roller:'player' for hero actions, not just bare roll_dice calls.
+  let playerRollRequests = 0;
   const { server, allowedTools } = createDmTools(engine, {
     onToolResult: (toolName: string, result: EngineResult) => {
       toolCallCounts[toolName] = (toolCallCounts[toolName] ?? 0) + 1;
@@ -84,6 +92,13 @@ async function main(): Promise<void> {
       } else {
         console.error(`[tool] ${toolName} -> ERROR: ${result.error}`);
       }
+    },
+    interactiveRoll: async (request) => {
+      playerRollRequests += 1;
+      console.error(
+        `[interactive_roll] roller=player expr=${request.expr} dc=${request.dc ?? 'none'} reason=${request.reason}`,
+      );
+      return engine.rollDice(request.expr, request.mode, request.reason, request.dc);
     },
   });
 
@@ -154,14 +169,26 @@ async function main(): Promise<void> {
 
   session.start();
 
+  // Player actions go through withMechanicsReminder so this smoke exercises
+  // the exact wire format the controller sends in the real game (the opening
+  // prompt is sent bare there too).
   await sendAndWait(buildOpeningPrompt(state), 'opening prompt');
+  // Both actions are deliberately scene-independent attempts-that-could-fail
+  // (stealth+climb, then persuasion) so a rules-honoring DM must roll no
+  // matter what opening scene it invented -- "attack the nearest enemy" style
+  // prompts made this check flaky, fizzling roll-free whenever the random
+  // opening happened to be peaceful.
   await sendAndWait(
-    'I look around for anyone nearby, then attack the most dangerous-looking hostile creature with my dagger!',
-    'attack prompt',
+    withMechanicsReminder(
+      'I slip away and try to quietly climb to a high vantage point — a wall, roof, or tall tree — to survey the area without being noticed.',
+    ),
+    'stealth-climb prompt',
   );
   await sendAndWait(
-    'I search whatever remains and take anything valuable, then note where I should go next.',
-    'loot prompt',
+    withMechanicsReminder(
+      'I approach the nearest person and try to charm out of them a secret or rumor they would not normally tell a stranger.',
+    ),
+    'persuasion prompt',
   );
 
   await session.end();
@@ -182,6 +209,12 @@ async function main(): Promise<void> {
     name: 'roll_dice_called_at_least_once',
     pass: rollDiceCalls >= 1,
     detail: `count=${rollDiceCalls}`,
+  });
+
+  checks.push({
+    name: 'player_roll_requested_at_least_once',
+    pass: playerRollRequests >= 1,
+    detail: `count=${playerRollRequests}`,
   });
 
   const mutatingToolCalls = Object.entries(toolCallCounts)

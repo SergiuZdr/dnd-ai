@@ -2,3 +2,5 @@ node_modules/
 saves/
 *.log
 dist/
+settings.json
+.DS_Store

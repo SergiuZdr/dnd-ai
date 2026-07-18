@@ -1,5 +1,11 @@
 // Character sheet + world ledger, always visible on the right. Pure
 // presentation over a GameState snapshot -- no state of its own.
+//
+// wrap="truncate-end" on the free-text lines (name, item names, quest
+// titles, location): those come from the player's hero name or the DM's
+// tool calls and have no tight length cap, so at this narrow a column width
+// they could otherwise wrap onto extra lines and push the sidebar taller
+// than the terminal -- truncating keeps this panel's height predictable.
 import { Box, Text } from 'ink';
 import type { GameState } from '../game/state';
 import { nextXpThreshold } from '../game/state';
@@ -44,8 +50,10 @@ export function Sidebar({ state, width }: SidebarProps) {
   return (
     <Box flexDirection="column" width={width} borderStyle="round" paddingX={1}>
       <Box flexDirection="column" flexGrow={1}>
-        <Text bold>{character.name}</Text>
-        <Text dimColor>{`Lv${character.level} ${character.race} ${character.className}`}</Text>
+        <Text bold wrap="truncate-end">
+          {character.name}
+        </Text>
+        <Text dimColor wrap="truncate-end">{`Lv${character.level} ${character.race} ${character.className}`}</Text>
 
         <Box marginTop={1}>
           <Text color={color}>{bar}</Text>
@@ -53,6 +61,7 @@ export function Sidebar({ state, width }: SidebarProps) {
         <Text>{`HP ${character.hp}/${character.maxHp}  AC ${character.ac}`}</Text>
         <Text>{`XP ${xpText}`}</Text>
         <Text>{`Gold ${character.gold}`}</Text>
+        <Text color="magenta">{`✦ Luck ${character.luck}`}</Text>
 
         <Box marginTop={1}>
           <Text>
@@ -65,7 +74,7 @@ export function Sidebar({ state, width }: SidebarProps) {
           <Text dimColor>— Inventory —</Text>
           {shownItems.length === 0 && <Text dimColor>(empty)</Text>}
           {shownItems.map((item, i) => (
-            <Text key={`${item.name}-${i}`}>{`${item.name} ×${item.qty}`}</Text>
+            <Text key={`${item.name}-${i}`} wrap="truncate-end">{`${item.name} ×${item.qty}`}</Text>
           ))}
           {inventoryOverflow > 0 && <Text dimColor>{`+${inventoryOverflow} more…`}</Text>}
         </Box>
@@ -74,13 +83,13 @@ export function Sidebar({ state, width }: SidebarProps) {
           <Text dimColor>— Quests —</Text>
           {shownQuests.length === 0 && <Text dimColor>(none active)</Text>}
           {shownQuests.map((quest) => (
-            <Text key={quest.title}>{`◆ ${quest.title}`}</Text>
+            <Text key={quest.title} wrap="truncate-end">{`◆ ${quest.title}`}</Text>
           ))}
           {completedCount > 0 && <Text dimColor>{`${completedCount} completed`}</Text>}
         </Box>
       </Box>
 
-      <Text>{`📍 ${world.location}`}</Text>
+      <Text wrap="truncate-end">{`📍 ${world.location}`}</Text>
     </Box>
   );
 }

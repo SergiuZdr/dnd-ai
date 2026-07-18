@@ -19,6 +19,10 @@ export interface Character {
   name: string;
   className: string;
   race: string;
+  /** Background preset name (e.g. "Soldier"), or '' if none was chosen (pre-background saves). */
+  background: string;
+  /** The DM-facing fact/hook granted by the background, e.g. "served as a soldier...". '' if none. */
+  backgroundFact: string;
   level: number;
   xp: number;
   hp: number;
@@ -27,6 +31,8 @@ export interface Character {
   stats: Stats;
   gold: number;
   inventory: Item[];
+  /** Rerolls-with-the-better-result the player can spend on a failed DC roll. Starts at 1, +1 per level-up, capped at 3. */
+  luck: number;
 }
 
 export type Disposition = 'friendly' | 'neutral' | 'hostile';
@@ -82,7 +88,9 @@ export interface GameState {
   chronicle: Chronicle;
 }
 
-export const SCHEMA_VERSION = 1;
+// v1 -> v2: added Character.luck (default 1), Character.background/backgroundFact
+// (default ''). See saves.ts's migrate* functions for the actual upgrade.
+export const SCHEMA_VERSION = 2;
 
 // 5e cumulative XP thresholds, index = level-1 (level 1 -> 0 XP ... level 20 -> 355000)
 export const XP_TABLE: readonly number[] = [

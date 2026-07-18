@@ -18,6 +18,8 @@ function makeState(): GameState {
       name: 'Hero',
       className: 'Fighter',
       race: 'Human',
+      background: '',
+      backgroundFact: '',
       level: 1,
       xp: 0,
       hp: 12,
@@ -26,6 +28,7 @@ function makeState(): GameState {
       stats: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
       gold: 10,
       inventory: [{ name: 'Rope', qty: 1 }],
+      luck: 1,
     },
     world: {
       theme: 'classic fantasy',
@@ -94,6 +97,134 @@ describe('Engine', () => {
       } finally {
         randomSpy.mockRestore();
       }
+    });
+
+    it('exposes the raw roll result (total/expr) alongside the message', () => {
+      const result = engine.rollDice('d20', 'normal', 'test');
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.roll.expr).toBe('d20');
+        expect(result.roll.total).toBeGreaterThanOrEqual(1);
+        expect(result.roll.total).toBeLessThanOrEqual(20);
+      }
+    });
+
+    it('omits the DC suffix entirely when dc is not provided', () => {
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.65);
+      try {
+        const result = engine.rollDice('d20+2', 'normal', 'attack roll');
+        expect(result.ok).toBe(true);
+        if (result.ok) expect(result.message).not.toContain('DC');
+      } finally {
+        randomSpy.mockRestore();
+      }
+    });
+
+    it('appends a "vs DC N — ✓ success" suffix when the total meets or beats dc', () => {
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.65); // d20 -> face 14, +2 = 16
+      try {
+        const metExactly = engine.rollDice('d20+2', 'normal', 'attack roll', 16);
+        expect(metExactly.ok).toBe(true);
+        if (metExactly.ok) {
+          expect(metExactly.message).toBe('🎲 d20+2 (attack roll) → [14]+2 = 16 vs DC 16 — ✓ success');
+        }
+        const beat = engine.rollDice('d20+2', 'normal', 'attack roll', 13);
+        expect(beat.ok).toBe(true);
+        if (beat.ok) expect(beat.message).toBe('🎲 d20+2 (attack roll) → [14]+2 = 16 vs DC 13 — ✓ success');
+      } finally {
+        randomSpy.mockRestore();
+      }
+    });
+
+    it('appends a "vs DC N — ✗ failure" suffix when the total falls short of dc', () => {
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.65); // total 16
+      try {
+        const result = engine.rollDice('d20+2', 'normal', 'attack roll', 20);
+        expect(result.ok).toBe(true);
+        if (result.ok) {
+          expect(result.message).toBe('🎲 d20+2 (attack roll) → [14]+2 = 16 vs DC 20 — ✗ failure');
+        }
+      } finally {
+        randomSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('rerollWithLuck', () => {
+    it('rejects with an EngineResult error when the character has no luck left', () => {
+      engine.state.character.luck = 0;
+      const first = engine.rollDice('d20', 'normal', 'test', 15);
+      expect(first.ok).toBe(true);
+      if (!first.ok) return;
+      const result = engine.rerollWithLuck(first.roll, 'test', 15);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.toLowerCase()).toContain('luck');
+    });
+
+    it('consumes exactly 1 luck and fires onMutation on success (unlike rollDice)', () => {
+      engine.state.character.luck = 2;
+      const first = engine.rollDice('d20', 'normal', 'test', 15);
+      expect(first.ok).toBe(true);
+      if (!first.ok) return;
+      mutationCount = 0;
+      const result = engine.rerollWithLuck(first.roll, 'test', 15);
+      expect(result.ok).toBe(true);
+      expect(engine.state.character.luck).toBe(1);
+      expect(mutationCount).toBe(1);
+    });
+
+    it('keeps the reroll when it is better, and says so', () => {
+      engine.state.character.luck = 1;
+      const firstSpy = vi.spyOn(Math, 'random').mockReturnValue(0); // face 1 -> fails dc 15
+      let previous;
+      try {
+        const first = engine.rollDice('d20', 'normal', 'a hard check', 15);
+        expect(first.ok).toBe(true);
+        if (first.ok) previous = first.roll;
+      } finally {
+        firstSpy.mockRestore();
+      }
+      const secondSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99); // face 20 -> succeeds
+      let result;
+      try {
+        result = engine.rerollWithLuck(previous!, 'a hard check', 15);
+      } finally {
+        secondSpy.mockRestore();
+      }
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.roll.total).toBe(20);
+        expect(result.message).toContain('reroll');
+        expect(result.message).toContain('— kept');
+        expect(result.message).toContain('(luck spent)');
+        expect(result.message).toContain('✓ success');
+      }
+    });
+
+    it('keeps the original total when the reroll is worse, but still spends the luck', () => {
+      engine.state.character.luck = 1;
+      const firstSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99); // face 20
+      let previous;
+      try {
+        const first = engine.rollDice('d20', 'normal', 'a check', 5);
+        expect(first.ok).toBe(true);
+        if (first.ok) previous = first.roll;
+      } finally {
+        firstSpy.mockRestore();
+      }
+      const secondSpy = vi.spyOn(Math, 'random').mockReturnValue(0); // face 1, worse
+      let result;
+      try {
+        result = engine.rerollWithLuck(previous!, 'a check', 5);
+      } finally {
+        secondSpy.mockRestore();
+      }
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.roll.total).toBe(20); // original kept, since it was better
+        expect(result.message).toContain('✓ success');
+      }
+      expect(engine.state.character.luck).toBe(0); // still spent, even though it didn't help
     });
   });
 
@@ -176,6 +307,35 @@ describe('Engine', () => {
       for (const bad of [NaN, 1.5, 0, -1, 10001]) {
         expect(engine.awardXp(bad).ok).toBe(false);
       }
+    });
+
+    it('grants +1 luck per level gained on level-up', () => {
+      engine.state.character.luck = 1;
+      engine.awardXp(300); // -> level 2, one level gained
+      expect(engine.state.character.level).toBe(2);
+      expect(engine.state.character.luck).toBe(2);
+    });
+
+    it('grants +1 luck per level even when multiple levels are gained in one award', () => {
+      engine.state.character.luck = 1;
+      engine.awardXp(1000); // -> level 3, two levels gained in one award
+      expect(engine.state.character.level).toBe(3);
+      expect(engine.state.character.luck).toBe(3);
+    });
+
+    it('caps luck at 3 even across multiple level-ups', () => {
+      engine.state.character.luck = 3;
+      const result = engine.awardXp(2700); // -> level 4, three levels gained
+      expect(result.ok).toBe(true);
+      expect(engine.state.character.level).toBe(4);
+      expect(engine.state.character.luck).toBe(3);
+    });
+
+    it('does not change luck when xp is awarded without a level-up', () => {
+      engine.state.character.luck = 1;
+      engine.awardXp(1);
+      expect(engine.state.character.level).toBe(1);
+      expect(engine.state.character.luck).toBe(1);
     });
   });
 

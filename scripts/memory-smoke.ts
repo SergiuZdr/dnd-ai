@@ -34,6 +34,8 @@ function buildFixtureState(): GameState {
       name: 'Sable',
       className: 'Ranger',
       race: 'Half-Elf',
+      background: 'Wanderer',
+      backgroundFact: 'has wandered many roads before this one and rarely stays anywhere for long',
       level: 1,
       xp: 0,
       hp: 11,
@@ -42,6 +44,7 @@ function buildFixtureState(): GameState {
       stats: { str: 12, dex: 16, con: 12, int: 10, wis: 14, cha: 10 },
       gold: 15,
       inventory: [{ name: 'Shortbow', qty: 1 }],
+      luck: 1,
     },
     world: {
       theme: 'classic fantasy',
@@ -173,6 +176,7 @@ async function main(): Promise<void> {
       recordNote(note);
       if (isFatalNote(note)) fatalError = note;
     },
+    onRollPrompt: () => {},
   };
 
   const controller = new GameController(state, cb, {
@@ -294,6 +298,7 @@ async function main(): Promise<void> {
       console.error(`[resume system_note] ${note}`);
       if (isFatalNote(note)) resumeFatalError = note;
     },
+    onRollPrompt: () => {},
   };
 
   const controller2 = new GameController(reloadedState, cb2, {
