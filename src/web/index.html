@@ -306,6 +306,11 @@
         return res.json();
       })
       .then(function (list) {
+        // showScreen must happen HERE, explicitly: the SSE hello handler
+        // deliberately never navigates away from the PIN screen, so without
+        // this line a correct PIN validated fine server-side while the page
+        // stayed frozen on the PIN screen (the launch-day phone bug).
+        showScreen('campaigns');
         renderCampaignList(list);
         connectSse();
       })
@@ -344,9 +349,17 @@
 
   function continueCampaign(slug) {
     postJson('/api/continue', { slug: slug })
-      .catch(function () { return null; }) // 409 (already running) is fine -- just attach via SSE below
-      .then(function () {
-        showScreen('play');
+      .catch(function () { return null; }) // network error -> body null, handled below
+      .then(function (body) {
+        // 409 ("session already running") resolves with an error body too --
+        // attaching to the live session via SSE is exactly right, so it still
+        // goes to the play screen. Any OTHER error (load failure, bad slug,
+        // server down) stays on the campaign list instead of dumping the
+        // player on a dead, empty play screen.
+        var alreadyRunning = body && body.error === 'session already running';
+        if (body && !body.error) { showScreen('play'); return; }
+        if (alreadyRunning) { showScreen('play'); return; }
+        console.error('continue failed:', body ? body.error : 'network error');
       });
   }
 
@@ -752,6 +765,9 @@
         return res.json();
       })
       .then(function (list) {
+        // Explicit, not left to the SSE hello race: without this the page
+        // stayed blank until (and unless) the hello event happened to arrive.
+        showScreen('campaigns');
         renderCampaignList(list);
         connectSse();
       })
