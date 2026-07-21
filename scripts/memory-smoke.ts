@@ -177,6 +177,7 @@ async function main(): Promise<void> {
       if (isFatalNote(note)) fatalError = note;
     },
     onRollPrompt: () => {},
+    onHistoryReplay: () => {},
   };
 
   const controller = new GameController(state, cb, {
@@ -299,6 +300,7 @@ async function main(): Promise<void> {
       if (isFatalNote(note)) resumeFatalError = note;
     },
     onRollPrompt: () => {},
+    onHistoryReplay: () => {},
   };
 
   const controller2 = new GameController(reloadedState, cb2, {

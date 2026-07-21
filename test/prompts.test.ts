@@ -134,3 +134,35 @@ describe('buildContextBrief verbatim window', () => {
     expect(brief).toContain('x'.repeat(500));
   });
 });
+
+/**
+ * Bug fix: the old closing line ("Resume the scene... do not re-summarize
+ * events... end with What do you do?") combined with a blank story log (now
+ * fixed separately via GameController's onHistoryReplay) gave the DM every
+ * incentive to re-narrate the scene the player already read. The brief now
+ * explicitly forbids restating/recapping/re-narrating anything above, and
+ * forbids repeating the same beat twice within one reply.
+ */
+describe('buildContextBrief closing instruction (anti-restatement)', () => {
+  it('tells the DM not to restate, recap, paraphrase, or re-narrate what the player already read', () => {
+    const brief = buildContextBrief(makeState(), []);
+    expect(brief.toLowerCase()).toMatch(/do not restate|do not recap|never restate/);
+    expect(brief.toLowerCase()).toContain('already read');
+  });
+
+  it('explicitly forbids repeating the same paragraph or beat twice within the reply', () => {
+    const brief = buildContextBrief(makeState(), []);
+    expect(brief.toLowerCase()).toMatch(/repeat the same (paragraph|beat)/);
+  });
+
+  it('still ends with the "What do you do?" hook in the DM voice', () => {
+    const brief = buildContextBrief(makeState(), []);
+    expect(brief).toContain('Continue in your DM voice');
+    expect(brief.endsWith('"What do you do?"')).toBe(true);
+  });
+
+  it('no longer contains the old "do not re-summarize events" phrasing', () => {
+    const brief = buildContextBrief(makeState(), []);
+    expect(brief).not.toContain('do not re-summarize events');
+  });
+});

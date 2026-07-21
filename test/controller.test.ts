@@ -1,7 +1,11 @@
-// Controller smoke WITHOUT AI: import-safety + guard-logic only. start() is
-// never called here (that would spin up a real DmSession/Agent SDK query) --
-// these tests only prove construction is side-effect-free and that the
+// Controller smoke WITHOUT AI: import-safety + guard-logic only. Most tests
+// here never call start() (that would spin up a real DmSession/Agent SDK
+// query) -- they only prove construction is side-effect-free and that the
 // busy/blank guards on submitPlayerAction hold before any session exists.
+// The "history replay on resume" block below is the one exception: it DOES
+// call start(), but always with a sessionFactory test seam (a fake
+// DmSessionLike, same pattern chronicle.test.ts uses), so no real SDK query
+// is ever constructed.
 
 import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'node:fs';
@@ -10,7 +14,7 @@ import * as path from 'node:path';
 import { GameController } from '../src/game/controller';
 import type { ControllerCallbacks, DmSessionLike, StoryEntry } from '../src/game/controller';
 import type { GameState } from '../src/game/state';
-import { loadGame } from '../src/game/saves';
+import { loadGame, appendTranscript } from '../src/game/saves';
 import { Engine } from '../src/game/engine';
 import type { EngineResult } from '../src/game/engine';
 import { DmError } from '../src/ai/dm';
@@ -64,6 +68,7 @@ function makeCallbacks(): ControllerCallbacks {
     onBusyChange: vi.fn(),
     onSystemNote: vi.fn(),
     onRollPrompt: vi.fn(),
+    onHistoryReplay: vi.fn(),
   };
 }
 
@@ -369,5 +374,132 @@ describe('GameController interactive player dice rolls', () => {
     expect(resolved).toHaveLength(0);
     expect(cb.onSystemNote).toHaveBeenCalledWith('The weave falters.');
     expect(cb.onBusyChange).toHaveBeenLastCalledWith(false);
+  });
+});
+
+/**
+ * Bug fix: resuming a campaign always started with a BLANK story log and
+ * handed the DM's brand-new (memory-less) session its own last narration
+ * plus "resume... end with What do you do?", inviting it to re-narrate (and,
+ * per dm.ts's appendTurnText fix, sometimes glue) the scene the player
+ * already read. onHistoryReplay lets the UI show the player's own actual
+ * prior scene instead of relying on the DM to reproduce it.
+ */
+describe('GameController history replay on resume', () => {
+  /** Records every send() call (and its relative order against onHistoryReplay, via the shared `calls` array passed in). */
+  class RecordingSession implements DmSessionLike {
+    sentMessages: string[] = [];
+    busy = false;
+    constructor(private readonly calls: string[]) {}
+    start(): void {}
+    send(text: string): void {
+      this.calls.push('send');
+      this.sentMessages.push(text);
+    }
+    async interrupt(): Promise<void> {}
+    async end(): Promise<void> {}
+  }
+
+  it('replays only the un-summarized tail (transcript.slice(lastSummarizedIndex)), mapped role->kind, BEFORE session.send()', () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-replay-'));
+    try {
+      const state = makeState();
+      state.chronicle.lastSummarizedIndex = 1; // the first entry below is already summarized away
+      appendTranscript(state.campaign.slug, { role: 'dm', text: 'Welcome. What do you do?', ts: 't0' }, baseDir);
+      appendTranscript(state.campaign.slug, { role: 'player', text: 'I look around.', ts: 't1' }, baseDir);
+      appendTranscript(state.campaign.slug, { role: 'dm', text: 'You see a quiet square.', ts: 't2' }, baseDir);
+
+      const calls: string[] = [];
+      const cb = makeCallbacks();
+      vi.mocked(cb.onHistoryReplay).mockImplementation(() => calls.push('replay'));
+      const sessionFactory = () => new RecordingSession(calls);
+
+      const controller = new GameController(state, cb, { baseDir, sessionFactory });
+      controller.start('resume');
+
+      expect(cb.onHistoryReplay).toHaveBeenCalledTimes(1);
+      const replayed = vi.mocked(cb.onHistoryReplay).mock.calls[0][0];
+      expect(replayed.map((e) => ({ kind: e.kind, text: e.text }))).toEqual([
+        { kind: 'player', text: 'I look around.' },
+        { kind: 'dm', text: 'You see a quiet square.' },
+      ]);
+      // The already-summarized first entry (index 0) is NOT replayed.
+      expect(replayed.some((e) => e.text === 'Welcome. What do you do?')).toBe(false);
+      // Called before session.send(), not after.
+      expect(calls).toEqual(['replay', 'send']);
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it('assigns replayed entries sequential ids that a subsequent live submitPlayerAction append never collides with', () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-replay-ids-'));
+    try {
+      const state = makeState();
+      appendTranscript(state.campaign.slug, { role: 'player', text: 'action one', ts: 't0' }, baseDir);
+      appendTranscript(state.campaign.slug, { role: 'dm', text: 'narration one', ts: 't1' }, baseDir);
+
+      const cb = makeCallbacks();
+      const controller = new GameController(state, cb, {
+        baseDir,
+        sessionFactory: () => new RecordingSession([]),
+      });
+      controller.start('resume');
+
+      const replayed = vi.mocked(cb.onHistoryReplay).mock.calls[0][0];
+      const replayedIds = replayed.map((e) => e.id);
+      expect(new Set(replayedIds).size).toBe(replayedIds.length); // no duplicate ids among the replay itself
+
+      // start() leaves busy=true (a turn is in flight); force it idle to
+      // exercise submitPlayerAction's id assignment without a full
+      // turn-complete round trip -- this gate is guard logic only (see the
+      // other busy-guard tests above), unrelated to what's being proven here.
+      (controller as unknown as { busy: boolean }).busy = false;
+      controller.submitPlayerAction('I check my pockets.');
+
+      const liveAppended = vi.mocked(cb.onStoryAppend).mock.calls.map(([entry]) => entry);
+      expect(liveAppended).toHaveLength(1); // the replay went through onHistoryReplay, not onStoryAppend
+      expect(replayedIds).not.toContain(liveAppended[0].id);
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it('replays for start("new-hero") too', () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-replay-newhero-'));
+    try {
+      const state = makeState();
+      appendTranscript(state.campaign.slug, { role: 'dm', text: 'The fallen hero is mourned.', ts: 't0' }, baseDir);
+
+      const cb = makeCallbacks();
+      const controller = new GameController(state, cb, {
+        baseDir,
+        sessionFactory: () => new RecordingSession([]),
+      });
+      controller.start('new-hero');
+
+      expect(cb.onHistoryReplay).toHaveBeenCalledTimes(1);
+      const replayed = vi.mocked(cb.onHistoryReplay).mock.calls[0][0];
+      expect(replayed.map((e) => e.text)).toEqual(['The fallen hero is mourned.']);
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it('never replays for start("new") -- there is no prior history to show', () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-replay-new-'));
+    try {
+      const state = makeState();
+      const cb = makeCallbacks();
+      const controller = new GameController(state, cb, {
+        baseDir,
+        sessionFactory: () => new RecordingSession([]),
+      });
+      controller.start('new');
+
+      expect(cb.onHistoryReplay).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
   });
 });

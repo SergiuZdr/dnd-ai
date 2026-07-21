@@ -132,6 +132,7 @@ function makeCallbacks(): ControllerCallbacks {
     onBusyChange: vi.fn(),
     onSystemNote: vi.fn(),
     onRollPrompt: vi.fn(),
+    onHistoryReplay: vi.fn(),
   };
 }
 

@@ -89,6 +89,14 @@ export interface ControllerCallbacks {
   onSystemNote: (note: string) => void;
   /** A player roll is awaiting SPACE/Enter (request), or has just been resolved/cancelled (null). */
   onRollPrompt: (request: PendingRollRequest | null) => void;
+  /**
+   * Called once, synchronously, at the top of start('resume'|'new-hero') --
+   * before anything is sent to the DM -- with the un-summarized transcript
+   * tail replayed as StoryEntry so the player sees their own actual prior
+   * scene (byte-identical) instead of relying on a freshly-prompted DM
+   * session to reproduce it from memory. Never called for start('new').
+   */
+  onHistoryReplay: (entries: StoryEntry[]) => void;
 }
 
 /**
@@ -265,6 +273,23 @@ export class GameController {
     }
 
     const transcript = readTranscript(this.state.campaign.slug, this.baseDir);
+
+    // Replay the un-summarized tail into the story log BEFORE sending
+    // anything to the (brand-new, memory-less) DmSession -- the player sees
+    // their own actual prior scene verbatim instead of relying on the DM to
+    // reproduce it, which invited exactly the kind of restated/re-narrated
+    // (and, per dm.ts's appendTurnText fix, sometimes glued-together) scene
+    // this replay exists to avoid. Same slice boundary shouldSummarize/
+    // runChronicleUpdate already use for "the unsummarized recent tail" --
+    // anything older is already captured in chronicle.storySoFar/chapters.
+    const unsummarized = transcript.slice(this.state.chronicle.lastSummarizedIndex);
+    const replayed: StoryEntry[] = unsummarized.map((entry) => ({
+      id: this.nextStoryId++,
+      kind: entry.role,
+      text: entry.text,
+    }));
+    this.cb.onHistoryReplay(replayed);
+
     const brief = buildContextBrief(this.state, transcript);
     if (mode === 'new-hero') {
       this.session.send(`${brief}\n\n${buildNewHeroPrompt(this.state)}`);
