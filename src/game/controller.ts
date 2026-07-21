@@ -313,8 +313,9 @@ export class GameController {
     this.setBusy(true);
 
     // Wire-only wrapper: transcript and story log above got the clean text;
-    // only the DM session sees the trailing mechanics reminder.
-    const wire = withMechanicsReminder(trimmed);
+    // only the DM session sees the trailing mechanics reminder (which also
+    // carries the hero's current precomputed modifiers/HP/AC/luck).
+    const wire = withMechanicsReminder(trimmed, this.state);
 
     if (this.swapping) {
       // Old session already ended, the fresh one isn't up yet -- hold the

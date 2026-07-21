@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dmSystemPrompt, buildOpeningPrompt, buildNewHeroPrompt, buildContextBrief } from '../src/ai/prompts';
+import { dmSystemPrompt, buildOpeningPrompt, buildNewHeroPrompt, buildContextBrief, withMechanicsReminder } from '../src/ai/prompts';
 import type { GameState } from '../src/game/state';
 import type { TranscriptEntry } from '../src/game/saves';
 
@@ -74,6 +74,52 @@ describe('dmSystemPrompt', () => {
   it('still carries the content-rating line for both ratings', () => {
     expect(dmSystemPrompt('PG-13')).toContain('Content rating: PG-13');
     expect(dmSystemPrompt('R')).toContain('Content rating: R');
+  });
+
+  it('R rating permits mature romance with an in-fiction fade to black and forbids out-of-character content lectures', () => {
+    const prompt = dmSystemPrompt('R');
+    expect(prompt).toContain('fade to black');
+    expect(prompt).toContain('NEVER break character');
+    expect(prompt).toMatch(/brutal and graphic/);
+    expect(prompt).not.toContain('still no sexual content');
+    // PG-13 keeps its stricter line untouched.
+    expect(dmSystemPrompt('PG-13')).toContain('no explicit gore, sexual content, or profanity');
+  });
+
+  it('pushes the DM to spread DCs across the whole range and to put stat modifiers in expr', () => {
+    const prompt = dmSystemPrompt('PG-13');
+    expect(prompt).toContain('Use the WHOLE dc range');
+    expect(prompt).toContain('ability modifier in expr');
+    expect(prompt).toContain('"d20-1"');
+  });
+
+  it('tells the DM to drive the action and demand rolls itself, not just wait for the player', () => {
+    const prompt = dmSystemPrompt('PG-13');
+    expect(prompt).toContain('Rolls flow both ways');
+    expect(prompt).toContain('Drive the action');
+  });
+});
+
+describe('hero sheet line (precomputed modifiers)', () => {
+  const sheetStats = { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 8 };
+
+  it('buildOpeningPrompt carries precomputed ability modifiers so a fresh DM never has to ask for stats', () => {
+    const prompt = buildOpeningPrompt(makeState({ stats: sheetStats }));
+    expect(prompt).toContain('STR+3');
+    expect(prompt).toContain('DEX+1');
+    expect(prompt).toContain('CHA-1');
+    expect(prompt).toMatch(/HP \d+\/\d+, AC \d+, luck \d+/);
+  });
+
+  it('withMechanicsReminder carries the current sheet each turn (mods, HP, AC, luck)', () => {
+    const state = makeState({ stats: sheetStats });
+    state.character.hp = 5;
+    state.character.maxHp = 12;
+    const wire = withMechanicsReminder('I kick the door.', state);
+    expect(wire.startsWith('I kick the door.')).toBe(true);
+    expect(wire).toContain('STR+3');
+    expect(wire).toContain('HP 5/12');
+    expect(wire.endsWith('</system-reminder>')).toBe(true);
   });
 });
 

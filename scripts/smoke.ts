@@ -181,12 +181,14 @@ async function main(): Promise<void> {
   await sendAndWait(
     withMechanicsReminder(
       'I slip away and try to quietly climb to a high vantage point — a wall, roof, or tall tree — to survey the area without being noticed.',
+      state,
     ),
     'stealth-climb prompt',
   );
   await sendAndWait(
     withMechanicsReminder(
       'I approach the nearest person and try to charm out of them a secret or rumor they would not normally tell a stranger.',
+      state,
     ),
     'persuasion prompt',
   );
