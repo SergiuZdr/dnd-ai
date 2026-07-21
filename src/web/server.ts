@@ -300,6 +300,14 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
           return;
         }
 
+        // Browsers request this unprompted; without the carve-out every page
+        // load logs a spurious 401. Nothing sensitive: 204, no body.
+        if (pathname === '/favicon.ico') {
+          res.writeHead(204);
+          res.end();
+          return;
+        }
+
         // Every route below is gated -- SSE can't set headers, so it takes
         // the pin as a query param instead of the X-Game-Pin header.
         const providedPin = pathname === '/api/events' ? (url.searchParams.get('pin') ?? undefined) : headerPin(req);
