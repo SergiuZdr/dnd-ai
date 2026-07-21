@@ -87,7 +87,7 @@ export function withMechanicsReminder(playerAction: string, state: GameState): s
     `${playerAction}\n\n` +
     `<system-reminder>DM mechanics check: if this action's outcome is uncertain (attack, sneak, persuade, search, resist...), ` +
     `call roll_dice FIRST with roller:'player' and a dc before narrating the result — expr includes the hero's relevant stat ` +
-    `modifier (e.g. "d20+3", "d20-1"), and dc varies with real difficulty (8 easy, 12 solid, 15+ hard). ` +
+    `modifier (e.g. "d20+3", "d20-1"), and dc varies with real difficulty (4-8 easy, 10 solid, 13+ hard). ` +
     `${heroSheetLine(state.character)} Route every state change ` +
     `(damage, healing, gold, items, XP, quests, NPCs, location) through its tool. If the scene has gone quiet, have the world ` +
     `act too — pressure, an ambush, a save the hero must make. Keep narration to 1-2 short paragraphs.</system-reminder>`
