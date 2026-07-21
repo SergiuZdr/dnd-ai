@@ -7,6 +7,7 @@
   },
   "scripts": {
     "play": "tsx src/index.tsx",
+    "serve": "tsx src/web/serve.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "spike": "tsx scripts/spike.ts",
