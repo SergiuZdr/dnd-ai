@@ -80,6 +80,18 @@ function stripDndPrefix(toolName: string): string {
   return toolName.startsWith(MCP_TOOL_PREFIX) ? toolName.slice(MCP_TOOL_PREFIX.length) : toolName;
 }
 
+/**
+ * Appends `next` to `existing`, inserting a blank-line separator first if
+ * `existing` is non-empty and doesn't already end in whitespace -- prevents
+ * two text segments from separate 'assistant' messages (a normal tool-loop
+ * pattern: narrate, call a tool, narrate more in a follow-up 'assistant'
+ * message) from gluing together mid-sentence with zero separator.
+ */
+export function appendTurnText(existing: string, next: string): string {
+  if (existing.length === 0 || /\s$/.test(existing)) return existing + next;
+  return `${existing}\n\n${next}`;
+}
+
 export class DmSession {
   private readonly config: DmSessionConfig;
   private readonly callbacks: DmSessionCallbacks;
@@ -169,7 +181,7 @@ export class DmSession {
               if (block.type === 'tool_use') {
                 this.callbacks.onToolUse?.(stripDndPrefix(block.name));
               } else if (block.type === 'text') {
-                this.turnText += block.text;
+                this.turnText = appendTurnText(this.turnText, block.text);
               }
             }
             break;

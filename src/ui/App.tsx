@@ -108,6 +108,10 @@ export function App({ debug = false }: AppProps = {}) {
         onBusyChange: (b) => setBusy(b),
         onSystemNote: (note) => appendSystemEntry(note),
         onRollPrompt: (request) => setPendingRoll(request),
+        // Fires once, synchronously, before start() sends anything to the DM
+        // on resume/new-hero -- replaces the setEntries([]) above with the
+        // player's actual prior scene instead of leaving the log blank.
+        onHistoryReplay: (replayed) => setEntries((prev) => [...prev, ...replayed]),
       },
       { debug },
     );

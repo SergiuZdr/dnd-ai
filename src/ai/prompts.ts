@@ -140,5 +140,5 @@ ${stateJson}
 RECENT EXCHANGES (verbatim, oldest first):
 ${verbatimText}
 ---
-Resume the scene from exactly where things left off — do not re-summarize events. Continue in your DM voice and end with "What do you do?"`;
+The player has already read everything above in their own history — do NOT restate, recap, paraphrase, or re-narrate any of it, even partially, and never repeat the same paragraph or beat twice within your reply. Move the scene forward with something new: react to the current moment, advance the action, or simply check in if the last beat was already resolved. Continue in your DM voice and end with "What do you do?"`;
 }
