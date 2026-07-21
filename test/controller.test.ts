@@ -174,12 +174,27 @@ describe('GameController interactive player dice rolls', () => {
     primeEngine(controller, state);
     const resolved = primePendingRoll(controller, { expr: 'd20', reason: 'a plain check' });
 
-    const reveal = controller.confirmRoll();
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.65); // d20 -> face 14
+    let reveal;
+    try {
+      reveal = controller.confirmRoll();
+    } finally {
+      randomSpy.mockRestore();
+    }
 
     expect(reveal?.canReroll).toBe(false);
     expect(resolved).toHaveLength(1);
     expect(resolved[0].ok).toBe(true);
     expect(cb.onRollPrompt).toHaveBeenLastCalledWith(null);
+
+    // Structured fields: no dc means no success verdict, but the roll detail is always there.
+    expect(reveal?.expr).toBe('d20');
+    expect(reveal?.reason).toBe('a plain check');
+    expect(reveal?.first).toEqual({ text: '[14]', total: 14 });
+    expect(reveal?.keptTotal).toBe(14);
+    expect(reveal?.dc).toBeUndefined();
+    expect(reveal?.success).toBeUndefined();
+    expect(reveal?.reroll).toBeUndefined();
   });
 
   it('confirmRoll offers a luck reroll on a failed dc when luck > 0, without resolving yet', () => {
@@ -191,8 +206,9 @@ describe('GameController interactive player dice rolls', () => {
     const resolved = primePendingRoll(controller, { expr: 'd20', reason: 'a hard check', dc: 15 });
 
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0); // d20 -> face 1, guaranteed to fail dc 15
+    let reveal;
     try {
-      const reveal = controller.confirmRoll();
+      reveal = controller.confirmRoll();
       expect(reveal?.canReroll).toBe(true);
       expect(reveal?.luck).toBe(1);
       expect(reveal?.message).toContain('✗ failure');
@@ -202,6 +218,13 @@ describe('GameController interactive player dice rolls', () => {
     // Not resolved yet -- the UI still owes a resolvePendingRoll() call.
     expect(resolved).toHaveLength(0);
     expect(cb.onRollPrompt).not.toHaveBeenLastCalledWith(null);
+
+    // Structured fields: dc known and failed -- success is explicitly false, not just falsy/undefined.
+    expect(reveal?.dc).toBe(15);
+    expect(reveal?.success).toBe(false);
+    expect(reveal?.first).toEqual({ text: '[1]', total: 1 });
+    expect(reveal?.keptTotal).toBe(1);
+    expect(reveal?.reroll).toBeUndefined();
   });
 
   it('confirmRoll does not offer a reroll when luck is 0, even on a failed dc', () => {
@@ -222,7 +245,7 @@ describe('GameController interactive player dice rolls', () => {
     expect(resolved).toHaveLength(1); // resolved immediately since there's nothing to wait for
   });
 
-  it('resolvePendingRoll(false) accepts the original roll as-is', () => {
+  it('resolvePendingRoll(false) accepts the original roll as-is and returns the same structured fields confirmRoll gave', () => {
     const state = makeState();
     state.character.luck = 2;
     const cb = makeCallbacks();
@@ -230,20 +253,27 @@ describe('GameController interactive player dice rolls', () => {
     primeEngine(controller, state);
     const resolved = primePendingRoll(controller, { expr: 'd20', reason: 'a hard check', dc: 15 });
 
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0); // face 1 -> fails dc 15
     try {
       controller.confirmRoll();
     } finally {
       randomSpy.mockRestore();
     }
-    controller.resolvePendingRoll(false);
+    const final = controller.resolvePendingRoll(false);
 
     expect(resolved).toHaveLength(1);
     expect(resolved[0].ok).toBe(true);
     expect(state.character.luck).toBe(2); // untouched -- luck only spends on useLuck: true
+
+    expect(final?.canReroll).toBe(false);
+    expect(final?.dc).toBe(15);
+    expect(final?.success).toBe(false);
+    expect(final?.first).toEqual({ text: '[1]', total: 1 });
+    expect(final?.keptTotal).toBe(1);
+    expect(final?.reroll).toBeUndefined();
   });
 
-  it('resolvePendingRoll(true) spends 1 luck, rerolls, and keeps the better total', () => {
+  it('resolvePendingRoll(true) spends 1 luck, rerolls, keeps the better total, and returns both rolls structured', () => {
     const state = makeState();
     state.character.luck = 2;
     const cb = makeCallbacks();
@@ -259,8 +289,9 @@ describe('GameController interactive player dice rolls', () => {
       randomSpy.mockRestore();
     }
     const secondSpy = vi.spyOn(Math, 'random').mockReturnValue(0.99); // reroll: face 20 -> succeeds
+    let final;
     try {
-      controller.resolvePendingRoll(true);
+      final = controller.resolvePendingRoll(true);
     } finally {
       secondSpy.mockRestore();
     }
@@ -272,6 +303,44 @@ describe('GameController interactive player dice rolls', () => {
       expect(resolved[0].message).toContain('luck spent');
       expect(resolved[0].message).toContain('✓ success');
     }
+
+    // Structured "both totals" case: first is the original (failed) roll,
+    // reroll is the luck-funded one, keptTotal picks the better of the two.
+    expect(final?.first).toEqual({ text: '[1]', total: 1 });
+    expect(final?.reroll).toEqual({ text: '[20]', total: 20 });
+    expect(final?.keptTotal).toBe(20);
+    expect(final?.dc).toBe(15);
+    expect(final?.success).toBe(true);
+    expect(final?.canReroll).toBe(false);
+    expect(final?.luck).toBe(1);
+  });
+
+  it('resolvePendingRoll(true) reflects the ORIGINAL roll as kept when the reroll comes up worse', () => {
+    const state = makeState();
+    state.character.luck = 1;
+    const cb = makeCallbacks();
+    const controller = new GameController(state, cb);
+    primeEngine(controller, state);
+    primePendingRoll(controller, { expr: 'd20', reason: 'a check', dc: 15 });
+
+    const firstSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5); // face 11 -- fails dc 15
+    try {
+      controller.confirmRoll();
+    } finally {
+      firstSpy.mockRestore();
+    }
+    const secondSpy = vi.spyOn(Math, 'random').mockReturnValue(0); // reroll: face 1, worse
+    let final;
+    try {
+      final = controller.resolvePendingRoll(true);
+    } finally {
+      secondSpy.mockRestore();
+    }
+
+    expect(final?.first).toEqual({ text: '[11]', total: 11 });
+    expect(final?.reroll).toEqual({ text: '[1]', total: 1 });
+    expect(final?.keptTotal).toBe(11); // the original, better roll -- not the reroll
+    expect(final?.success).toBe(false); // still fails dc 15 even with the better (11) total kept
   });
 
   it('interrupt() clears a pending roll without ever resolving it, and re-enables input', async () => {

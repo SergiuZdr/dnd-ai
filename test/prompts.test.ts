@@ -47,6 +47,12 @@ describe('dmSystemPrompt', () => {
     expect(prompt).toMatch(/[Nn]ever recap what the player just said/);
   });
 
+  it('instructs a short 3-6 word roll_dice reason, never a full sentence (bug fix: long reasons pushed the roll result off screen)', () => {
+    const prompt = dmSystemPrompt('PG-13');
+    expect(prompt).toContain('3-6 words');
+    expect(prompt).toMatch(/never a full sentence/);
+  });
+
   it('gives DC guidance with the full trivial/easy/medium/hard/very-hard scale and roller:player/dm split', () => {
     const prompt = dmSystemPrompt('PG-13');
     expect(prompt).toContain('5 trivial');
