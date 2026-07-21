@@ -69,7 +69,12 @@ export function createDmTools(
     {
       expr: z.string().describe('e.g. "d20", "2d6+3"'),
       mode: z.enum(['normal', 'advantage', 'disadvantage']).optional(),
-      reason: z.string(),
+      reason: z
+        .string()
+        .describe(
+          'Short check label, 3-6 words, e.g. "Persuasion — sway the constable". Never a full sentence -- ' +
+            'it is displayed on screen next to the roll and gets cut off if long.',
+        ),
       dc: z.number().int().optional().describe('Target number to meet or beat for success, when the fiction calls for one.'),
       roller: z
         .enum(['player', 'dm'])

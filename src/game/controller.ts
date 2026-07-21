@@ -19,7 +19,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { GameState } from './state';
-import { Engine } from './engine';
+import { Engine, formatRollDetail } from './engine';
 import type { EngineResult } from './engine';
 import type { RollResult } from './dice';
 import { createDmTools } from '../ai/tools';
@@ -40,10 +40,37 @@ export interface StoryEntry {
 /** A player-triggered dice roll awaiting SPACE/Enter in the UI. Mirrors InteractiveRollRequest (ai/tools.ts) minus nothing -- kept as a separate type so the UI layer never has to import from ai/. */
 export type PendingRollRequest = InteractiveRollRequest;
 
-/** What confirmRoll() hands back to the UI once the (real, engine-rolled) result is in. */
+/** Dice-faces + modifier text only, e.g. "[7]" or "[7]+3" -- no total (that's RollDetail.total, kept separate so the UI composes its own layout instead of parsing a formatted string). */
+export interface RollDetail {
+  text: string;
+  total: number;
+}
+
+/**
+ * What confirmRoll()/resolvePendingRoll() hand back to the UI once a real,
+ * engine-rolled result is in. Structured on purpose (not just `message`):
+ * the DM can send an arbitrarily long `reason`, and a UI that builds its
+ * display by concatenating reason+numbers into one string risks truncating
+ * the numbers themselves off screen. Structured fields let the UI put the
+ * numbers on their own row, which can never be pushed out by the reason.
+ * `message` is kept too -- unchanged, full-detail -- for anything that just
+ * wants the one-line summary (e.g. the transcript-facing onDiceRoll pipeline
+ * reuses the same string engine.rollDice already produced).
+ */
 export interface RollRevealResult {
   message: string;
-  /** True when the roll failed its dc and the hero still has luck to spend on a reroll. */
+  expr: string;
+  /** As sent by the DM. Short by convention (see ai/tools.ts, ai/prompts.ts) but the UI defensively truncates regardless -- never assume it's short. */
+  reason: string;
+  first: RollDetail;
+  /** Present only once a luck reroll has happened. */
+  reroll?: RollDetail;
+  /** The better of first.total and reroll.total (equals first.total when there was no reroll). */
+  keptTotal: number;
+  dc?: number;
+  /** Defined only when dc is known. */
+  success?: boolean;
+  /** True while still awaiting a luck decision (roll executed, failed its dc, hero has luck left). */
   canReroll: boolean;
   /** Current luck count, for the "✦ Luck N — press L to reroll" prompt text. */
   luck: number;
@@ -315,24 +342,60 @@ export class GameController {
     } else {
       this.finishPendingRoll(result);
     }
-    return { message: result.message, canReroll, luck: character.luck };
+    return this.buildReveal(request, result.message, result.roll, character.luck, canReroll);
   }
 
   /**
    * Called by the UI after a confirmRoll() reveal with canReroll: true.
    * useLuck true = player pressed L (spend 1 luck, keep the better of the two
    * totals); false = accept the original roll as-is (Enter or anything else).
-   * No-op if there's no roll awaiting a luck decision.
+   * Returns the FINAL reveal (post-decision) so the UI can show it without
+   * re-deriving anything; undefined only if there's no roll awaiting a luck
+   * decision, or the (already-luck-checked) reroll itself somehow errors.
    */
-  resolvePendingRoll(useLuck: boolean): void {
+  resolvePendingRoll(useLuck: boolean): RollRevealResult | undefined {
     const pending = this.pendingRoll;
-    if (!pending || !this.engine || !pending.firstRoll || pending.firstMessage === undefined) return;
+    if (!pending || !this.engine || !pending.firstRoll || pending.firstMessage === undefined) return undefined;
+    const { request, firstRoll, firstMessage } = pending;
     if (!useLuck) {
-      this.finishPendingRoll({ ok: true, message: pending.firstMessage, events: [] });
-      return;
+      this.finishPendingRoll({ ok: true, message: firstMessage, events: [] });
+      return this.buildReveal(request, firstMessage, firstRoll, this.engine.state.character.luck, false);
     }
-    const result = this.engine.rerollWithLuck(pending.firstRoll, pending.request.reason, pending.request.dc);
+    const result = this.engine.rerollWithLuck(firstRoll, request.reason, request.dc);
     this.finishPendingRoll(result);
+    if (!result.ok) return undefined;
+    return this.buildReveal(
+      request,
+      result.message,
+      firstRoll,
+      this.engine.state.character.luck,
+      false,
+      result.reroll,
+    );
+  }
+
+  /** Shared RollRevealResult builder for confirmRoll/resolvePendingRoll -- see the type's doc comment for why it's structured instead of just `message`. */
+  private buildReveal(
+    request: PendingRollRequest,
+    message: string,
+    first: RollResult,
+    luck: number,
+    canReroll: boolean,
+    reroll?: RollResult,
+  ): RollRevealResult {
+    const kept = reroll && reroll.total > first.total ? reroll : first;
+    return {
+      message,
+      expr: request.expr,
+      reason: request.reason,
+      first: { text: formatRollDetail(first), total: first.total },
+      reroll: reroll ? { text: formatRollDetail(reroll), total: reroll.total } : undefined,
+      keptTotal: kept.total,
+      dc: request.dc,
+      success: request.dc !== undefined ? kept.total >= request.dc : undefined,
+      canReroll,
+      luck,
+    };
   }
 
   /**

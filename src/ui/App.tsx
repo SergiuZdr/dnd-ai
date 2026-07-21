@@ -18,10 +18,10 @@ import { Menu } from './Menu';
 import { StoryLog } from './StoryLog';
 import { Sidebar } from './Sidebar';
 import { DiceLine } from './DiceLine';
-import { RollPrompt } from './RollPrompt';
 import { InputBar } from './InputBar';
 import { Wizard } from './wizard/Wizard';
 import { formatHelp, formatCharacterSheet, formatJournal, unknownCommandNote } from './slashCommands';
+import { DICE_AREA_HEIGHT, computeStoryHeight } from './layout';
 
 type Mode = 'menu' | 'wizard' | 'game';
 type GameStartMode = 'new' | 'resume' | 'new-hero';
@@ -29,13 +29,6 @@ type GameStartMode = 'new' | 'resume' | 'new-hero';
 const MIN_COLUMNS = 80;
 const MIN_ROWS = 20;
 const SIDEBAR_WIDTH = 34;
-// Fixed rows for the areas below the story log, so the story viewport's
-// height (and therefore the whole frame's total height) is exact and never
-// shifts: a 2-row dice/roll-prompt area (DiceLine is 1 line; RollPrompt's
-// luck-offer line uses the 2nd) plus InputBar's 3-row bordered box (top
-// border + content + bottom border).
-const DICE_AREA_HEIGHT = 2;
-const INPUT_BAR_HEIGHT = 3;
 
 function readDimensions(stdout: NodeJS.WriteStream): { columns: number; rows: number } {
   // `||` not `??`: some ptys (CI, `script`) report 0×0, which would otherwise
@@ -220,25 +213,22 @@ export function App({ debug = false }: AppProps = {}) {
 
   // Explicit widths on BOTH columns (not flexGrow) so a long streaming line
   // can never squeeze the sidebar narrower; explicit story height so the
-  // whole frame's total height is exactly dimensions.rows, always -- see the
-  // DICE_AREA_HEIGHT/INPUT_BAR_HEIGHT comment above.
+  // whole frame's total height is exactly dimensions.rows, always -- see
+  // computeStoryHeight (./layout.ts) for the row budget this is built from.
   const storyWidth = dimensions.columns - SIDEBAR_WIDTH;
-  const storyHeight = Math.max(1, dimensions.rows - DICE_AREA_HEIGHT - INPUT_BAR_HEIGHT);
+  const storyHeight = computeStoryHeight(dimensions.rows);
 
   return (
     <Box flexDirection="row" height={dimensions.rows}>
       <Box flexDirection="column" width={storyWidth} height={dimensions.rows}>
         <StoryLog entries={entries} partial={partial} width={storyWidth} height={storyHeight} inputActive={!busy} />
         <Box flexDirection="column" height={DICE_AREA_HEIGHT}>
-          {pendingRoll ? (
-            <RollPrompt
-              request={pendingRoll}
-              onConfirm={() => controller.confirmRoll()}
-              onResolveLuck={(useLuck) => controller.resolvePendingRoll(useLuck)}
-            />
-          ) : (
-            <DiceLine message={diceMessage} />
-          )}
+          <DiceLine
+            request={pendingRoll}
+            fallbackMessage={diceMessage}
+            onConfirm={() => controller.confirmRoll()}
+            onResolveLuck={(useLuck) => controller.resolvePendingRoll(useLuck)}
+          />
         </Box>
         <InputBar
           busy={busy}

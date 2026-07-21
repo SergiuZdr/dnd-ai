@@ -18,11 +18,14 @@ export type EngineResult =
  * a caller orchestrating the interactive player-roll flow (GameController)
  * can hold onto it for a possible luck reroll without re-rolling (which
  * would silently produce different numbers than what was already shown).
- * Structurally assignable to EngineResult wherever the ok branch only reads
- * message/events, so existing call sites (tools.ts, etc.) need no changes.
+ * `reroll` is populated ONLY by rerollWithLuck -- the raw second roll, so the
+ * caller can show both totals even when the original (not the reroll) was
+ * the one kept. Structurally assignable to EngineResult wherever the ok
+ * branch only reads message/events, so existing call sites (tools.ts, etc.)
+ * need no changes.
  */
 export type RollEngineResult =
-  | { ok: true; message: string; events: string[]; roll: RollResult }
+  | { ok: true; message: string; events: string[]; roll: RollResult; reroll?: RollResult }
   | { ok: false; error: string };
 
 /** +1 luck per level gained, capped at this value. */
@@ -32,15 +35,25 @@ function isBoundedInt(n: number, min: number, max: number): boolean {
   return Number.isInteger(n) && n >= min && n <= max;
 }
 
-/** `[14, 6]+2 = 22`-style rendering of one RollResult, shared by fresh rolls and reroll segments. */
-function rollSegment(result: RollResult): string {
+/**
+ * `[14, 6]+2`-style rendering of a RollResult's dice faces + modifier, with
+ * no total -- exported so UI layers building their own compact layouts
+ * (GameController's structured RollRevealResult) can compose it themselves
+ * instead of parsing the full formatted message string.
+ */
+export function formatRollDetail(result: RollResult): string {
   const facesText =
     result.mode === 'normal'
       ? `[${result.chosen.join(', ')}]`
       : `attempts ${JSON.stringify(result.attempts)} -> kept [${result.chosen.join(', ')}]`;
   const modifierText =
     result.modifier > 0 ? `+${result.modifier}` : result.modifier < 0 ? `${result.modifier}` : '';
-  return `${facesText}${modifierText} = ${result.total}`;
+  return `${facesText}${modifierText}`;
+}
+
+/** `[14, 6]+2 = 22`-style rendering of one RollResult, shared by fresh rolls and reroll segments. */
+function rollSegment(result: RollResult): string {
+  return `${formatRollDetail(result)} = ${result.total}`;
 }
 
 /** ` vs DC 13 — ✓ success` / ` vs DC 13 — ✗ failure`, or '' when dc is absent. */
@@ -112,7 +125,7 @@ export class Engine {
     const kept = rerolled.total > previous.total ? rerolled : previous;
     const message = formatRerollMessage(previous.expr, reason, previous, rerolled, dc);
     this.mutate();
-    return { ok: true, message, events: [], roll: kept };
+    return { ok: true, message, events: [], roll: kept, reroll: rerolled };
   }
 
   applyDamage(amount: number, reason: string): EngineResult {

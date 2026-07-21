@@ -163,4 +163,14 @@ describe('createDmTools roll_dice', () => {
     expect(textOf(result)).toContain('ERROR');
     expect(textOf(result)).toContain('no luck left');
   });
+
+  it("schema instructs a short 3-6 word reason label, never a full sentence (bug fix: a sentence-length reason pushed the roll result off screen)", () => {
+    const engine = new Engine(makeState());
+    const { tools } = createDmTools(engine);
+    const rollDice = findRollDice(tools);
+
+    const reasonSchema = (rollDice.inputSchema as any).reason;
+    expect(reasonSchema.description).toContain('3-6 words');
+    expect(reasonSchema.description.toLowerCase()).toContain('never a full sentence');
+  });
 });
