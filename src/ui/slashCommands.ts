@@ -1,8 +1,10 @@
 // Pure text formatting for the local (never sent to the DM, never appended to
 // the transcript) slash commands: /help, /sheet, /journal, and the fallback
 // note for an unrecognized command. Dispatch (which command maps to which
-// controller call / navigation) lives in App.tsx -- this module only builds
-// the strings shown in the story log.
+// controller call / navigation) lives in App.tsx for the TUI and
+// src/web/server.ts for phone/web play -- this module only builds the
+// strings shown in the story log/feed, and is ink-free (plain string
+// builders) so both callers can share it unmodified.
 
 import type { Chronicle, GameState } from '../game/state';
 import { nextXpThreshold } from '../game/state';
@@ -24,6 +26,14 @@ export const KEY_HELP: ReadonlyArray<{ keys: string; desc: string }> = [
   { keys: 'Esc', desc: "Interrupt the DM mid-turn (does nothing while a roll is pending — it won't cancel your roll)." },
 ];
 
+/** Phone/web equivalent of KEY_HELP -- taps instead of keys, no PgUp/bracket/SPACE talk. */
+export const WEB_TAP_HELP: ReadonlyArray<{ action: string; desc: string }> = [
+  { action: 'Scroll', desc: 'Just drag the story feed -- it only auto-scrolls when you were already at the bottom.' },
+  { action: 'ROLL button', desc: 'Tap it when a roll card appears at the bottom.' },
+  { action: 'Luck buttons', desc: 'REROLL spends 1 luck and keeps the better result; Accept keeps your roll as-is.' },
+  { action: 'Stop', desc: "Interrupt the DM mid-turn (disabled while a roll card is up -- it won't cancel your roll)." },
+];
+
 export function formatHelp(): string {
   return [
     'Commands:',
@@ -31,6 +41,23 @@ export function formatHelp(): string {
     '',
     'Keys:',
     ...KEY_HELP.map(({ keys, desc }) => `  ${keys} — ${desc}`),
+  ].join('\n');
+}
+
+/**
+ * Web version of /help: /retire and /quit aren't offered on web v1 (see
+ * src/web/server.ts), so they're left out of the listing here rather than
+ * advertising commands that just bounce back a "TUI-only" note; the tap
+ * equivalents replace the TUI's keyboard-shortcut list.
+ */
+export function formatHelpWeb(): string {
+  const webCommands = SLASH_COMMANDS.filter((c) => c.cmd !== '/retire' && c.cmd !== '/quit');
+  return [
+    'Commands:',
+    ...webCommands.map(({ cmd, desc }) => `  ${cmd} — ${desc}`),
+    '',
+    'On your phone:',
+    ...WEB_TAP_HELP.map(({ action, desc }) => `  ${action} — ${desc}`),
   ].join('\n');
 }
 

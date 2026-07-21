@@ -110,6 +110,35 @@ Type these instead of an action:
 | `/quit` | Save and exit |
 | `/help` | List these commands (and the scroll/roll keys above) in-game |
 
+## Playing on your phone
+
+The same campaign, in your phone's browser — no app to install. Campaigns are still created in the terminal (`npm run play`); phone/web mode is for **continuing and playing** an existing one from your couch.
+
+1. On the computer where your saves live, run:
+   ```
+   npm run serve
+   ```
+   This starts a small local web server and prints a box with a URL and a PIN, e.g.:
+   ```
+   http://192.168.1.23:3123
+   PIN: 482913
+   ```
+2. On your phone (same Wi-Fi), open that address in any browser.
+3. Enter the PIN shown in the terminal — your phone remembers it after that.
+4. Pick a campaign to **Continue** and play: streaming narration, the same interactive dice (tap the ROLL button; tap REROLL to spend a luck point), tap-to-expand character/world stats, and the same slash commands (`/help`, `/sheet`, `/journal`, `/save`).
+
+**Options:** `--port 4000` (default `3123`), `--host 127.0.0.1` (default `0.0.0.0`, all interfaces), `--no-pin` (skip the PIN — only on a network you fully trust), `--debug` (same raw-SDK logging as the TUI's `--debug`).
+
+**Playing away from home:** your phone just needs to reach the machine running `npm run serve`. The simple, safe way is a personal mesh VPN like [Tailscale](https://tailscale.com) — install it on both ends and browse to the Tailscale address instead of the LAN one.
+
+> **Never port-forward this to the raw internet.** The PIN is a 6-digit lock, not real authentication — no rate-limiting, no HTTPS, nothing else standing between "reaches this port" and "can spend your Claude usage and read/write your saves." LAN or a private VPN (Tailscale), always.
+
+**What's different from the terminal:**
+- No new-campaign wizard on web — build characters in the terminal, then continue them from your phone.
+- `/retire` and `/quit` aren't available on web yet — they answer with a note pointing back at the terminal. Just close the tab to stop playing; progress is already saved after every turn.
+- Only one device drives a campaign at a time — opening it on your phone while it's already running elsewhere just joins the existing session instead of starting a second one.
+- Everything else (the DM, the dice, the "forever" memory system, the save files) is the identical game underneath — the phone is just a second window into it.
+
 ## Death
 
 Death is meant to land — the DM is instructed to make it a real, dramatic scene, not a stat-block formality. When your hero falls, the world doesn't end with them: type `/retire` to build a brand-new hero (name, class, race, background, stats) and step into the same campaign, the same world, the same history, picking up right where the story left off — just with someone new carrying it forward.
@@ -169,9 +198,12 @@ src/
   ai/       Agent SDK session wrapper, DM system prompt + context-brief builder, MCP tool layer, chronicle summarizer
   ui/       ink components: App shell, bounded story log + pure line-wrapping, sidebar,
             input bar, interactive roll prompt, wizard
+  web/      phone/web mode: bridge.ts (pure ControllerCallbacks -> SSE-event mirror),
+            server.ts (PIN-gated HTTP/SSE routes over plain `http`, no framework),
+            serve.ts (CLI entry), index.html (single-file mobile UI, no build step)
 ```
 
-The engine owns every mechanical rule; the AI layer only narrates and calls tools the engine validates. See `PLAN.md` for the full design writeup.
+The engine owns every mechanical rule; the AI layer only narrates and calls tools the engine validates. The web server is a second front end on top of the exact same `GameController` the TUI uses — see `src/web/bridge.ts`'s header comment. See `PLAN.md` for the full design writeup.
 
 - `npm test` — the full vitest suite, no AI calls.
 - `npm run typecheck` — `tsc --noEmit`.
