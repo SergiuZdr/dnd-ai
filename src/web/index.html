@@ -212,6 +212,15 @@
     box-shadow: inset 0 2px 8px rgba(0,0,0,.55);
   }
   #pin-input:focus { outline: 2px solid var(--brass-bright); outline-offset: 2px; }
+  /* Access-code mode: the segmented 6-cell treatment above is meaningless for a
+     29-character grouped code, so drop the cells and let it breathe as one wide
+     field. Set by the client once GET /api/auth-mode says which we're in. */
+  /* Sized in ch off the mono font so all 29 characters of a code fit without
+     clipping, rather than guessing a px width that only works at one font size. */
+  #pin-input.code-mode {
+    width: 100%; max-width: calc(31ch + 24px); letter-spacing: .02em; text-indent: 0;
+    font-size: .98rem; text-align: center; background-image: none; padding: 15px 12px;
+  }
   .big-btn {
     background: linear-gradient(180deg, var(--brass-bright), var(--brass)); color: var(--ink); border: none; border-radius: 12px;
     padding: 15px 28px; font-size: 1rem; font-weight: 700; min-width: 180px; font-family: var(--font-display);
@@ -888,7 +897,7 @@
       <div class="brand-die3d" id="brand-die-pin"></div>
       <div class="eyebrow">A Solo Campaign</div>
       <div class="wordmark" style="font-size: 1.7rem;">AI Dungeon Master</div>
-      <div class="subtitle">Enter the 6-digit PIN shown in your server's terminal.</div>
+      <div class="subtitle" id="pin-subtitle">Enter the 6-digit PIN shown in your server's terminal.</div>
       <input id="pin-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" autocomplete="off" />
       <button id="pin-submit" class="big-btn">Continue</button>
       <div class="error-text" id="pin-error" aria-live="polite"></div>
@@ -1031,6 +1040,7 @@
     wizardScreen: document.getElementById('screen-wizard'),
     playScreen: document.getElementById('screen-play'),
     pinInput: document.getElementById('pin-input'),
+    pinSubtitle: document.getElementById('pin-subtitle'),
     pinSubmit: document.getElementById('pin-submit'),
     pinError: document.getElementById('pin-error'),
     campaignList: document.getElementById('campaign-list'),
@@ -1073,6 +1083,8 @@
   };
 
   var pin = localStorage.getItem(PIN_KEY) || '';
+  /** 'pin' | 'code' -- set by applyAuthMode() from GET /api/auth-mode; only affects wording and the input's shape, never how the credential is sent. */
+  var authMode = 'pin';
   var currentScreen = null;
   var session = null; // last 'hello' snapshot, kept up to date by every subsequent event
   var partial = '';
@@ -1120,7 +1132,8 @@
         localStorage.removeItem(PIN_KEY);
         pin = '';
         showScreen('pin');
-        els.pinError.textContent = 'Wrong PIN — try again.';
+        els.pinError.textContent =
+          authMode === 'code' ? 'That access code was not accepted — check it and try again.' : 'Wrong PIN — try again.';
         throw new Error('unauthorized');
       }
       return res;
@@ -2499,7 +2512,35 @@
 
   // ---------------------------------------------------------------- boot
 
+  /**
+   * Shapes the single login field for whatever the server actually wants. The
+   * PIN treatment is a 6-cell numeric input, which physically cannot accept a
+   * 29-character access code, so this has to run before the player can type.
+   * Unauthenticated endpoint (it only reports which mode we're in), and any
+   * failure leaves the PIN default -- the safe assumption, since a server with
+   * no players registered is exactly the PIN case.
+   */
+  function applyAuthMode() {
+    return fetch('/api/auth-mode')
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (body) {
+        if (!body || body.mode !== 'code') return;
+        var input = els.pinInput;
+        input.classList.add('code-mode');
+        input.removeAttribute('inputmode');
+        input.removeAttribute('pattern');
+        input.setAttribute('maxlength', '48');
+        input.setAttribute('autocapitalize', 'off');
+        input.setAttribute('spellcheck', 'false');
+        input.placeholder = 'xxxx-xxxx-xxxx-xxxx-xxxx-xxxx';
+        els.pinSubtitle.textContent = 'Enter your access code. Ask whoever runs the server if you need one.';
+        authMode = 'code';
+      })
+      .catch(function () { /* keep the PIN default */ });
+  }
+
   function boot() {
+    applyAuthMode();
     if (!pin) { showScreen('pin'); return; }
     apiFetch('/api/campaigns')
       .then(function (res) {
