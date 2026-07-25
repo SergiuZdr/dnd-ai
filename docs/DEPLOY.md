@@ -86,7 +86,7 @@ Fly's free allowance doesn't stretch to an **always-on** machine (this deploy di
 
 4. **Set secrets** (never in a file):
    ```
-   fly secrets set OPENROUTER_API_KEY=sk-... GAME_PIN=482913871
+   fly secrets set OPENROUTER_API_KEY=sk-... GAME_PIN=<a-long-random-string-you-choose>
    ```
    Use a **longer PIN than the local-dev 6 digits** for a public deploy — see Security notes below. Digits only isn't required by the server (it's compared as a plain string), but keep it something you can type on a phone.
 
@@ -136,7 +136,7 @@ Oracle's Always Free tier includes an ARM (Ampere A1) VM that's genuinely free w
    cat > .env <<'EOF'
    PORT=3123
    HOST=0.0.0.0
-   GAME_PIN=482913871
+   GAME_PIN=<a-long-random-string-you-choose>
    SAVES_DIR=/home/ubuntu/dnd-ai-saves
    DND_DM_BACKEND=openai
    DND_OPENAI_BASE_URL=https://openrouter.ai/api/v1
