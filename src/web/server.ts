@@ -32,6 +32,7 @@ import {
 } from '../ui/slashCommands';
 import { GameBridge } from './bridge';
 import type { SseSink } from './bridge';
+import { authenticate, hasPlayers, playerSavesDir, touchLastSeen } from '../game/players';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX_HTML_PATH = path.join(__dirname, 'index.html');
@@ -224,11 +225,48 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
     opts.pinLockoutMs ?? DEFAULT_PIN_LOCKOUT_MS,
   );
 
-  const bridge = new GameBridge();
-  let controller: GameControllerLike | undefined;
-  let activeState: GameState | undefined;
+  /**
+   * The effective saves root. saves.ts defaults an undefined baseDir to
+   * cwd/saves internally, but the player registry and per-player directories
+   * need a concrete path to join, so resolve it once here with the same rule.
+   */
+  const savesRoot = baseDir ?? path.join(process.cwd(), 'saves');
 
-  function handleSlashCommand(raw: string): void {
+  /** Session key used when no players are registered -- see resolveIdentity(). */
+  const SOLO_SESSION_ID = '__solo__';
+
+  /**
+   * One player's live game. Everything that used to be a module-scope singleton
+   * (bridge/controller/activeState) lives here instead, so two players can play
+   * at once without seeing each other: `bridge` owns its OWN set of SSE sinks,
+   * so a broadcast reaches only the clients subscribed to that player's stream.
+   */
+  interface Session {
+    playerId: string;
+    /** saves.ts `baseDir` scoped to this player -- the whole isolation mechanism. */
+    saveDir: string;
+    bridge: GameBridge;
+    controller?: GameControllerLike;
+    activeState?: GameState;
+  }
+
+  const sessions = new Map<string, Session>();
+
+  function sessionFor(playerId: string, saveDir: string): Session {
+    let session = sessions.get(playerId);
+    if (!session) {
+      session = { playerId, saveDir, bridge: new GameBridge() };
+      sessions.set(playerId, session);
+    }
+    return session;
+  }
+
+  // Created up front so GameServerHandle.bridge is a stable reference in
+  // single-player mode (serve.ts and the existing tests hold onto it).
+  const soloSession = sessionFor(SOLO_SESSION_ID, savesRoot);
+
+  function handleSlashCommand(session: Session, raw: string): void {
+    const { bridge, activeState, controller } = session;
     const command = raw.trim().toLowerCase();
     switch (command) {
       case '/help':
@@ -259,8 +297,10 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
     }
   }
 
-  async function handleContinue(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (bridge.hasSession) {
+  async function handleContinue(session: Session, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    // Per-session now: another player having a game open is none of this
+    // player's business, so only their OWN active session blocks them.
+    if (session.bridge.hasSession) {
       respondJson(res, 409, { error: 'session already running' });
       return;
     }
@@ -278,19 +318,21 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
     }
     let state: GameState;
     try {
-      state = loadGame(slug, baseDir);
+      // session.saveDir, not baseDir: a slug that exists for another player
+      // simply isn't found here, which is what makes saves private.
+      state = loadGame(slug, session.saveDir);
     } catch {
       respondJson(res, 404, { error: `campaign "${slug}" not found` });
       return;
     }
-    activeState = state;
-    const cb = bridge.attach({ slug: state.campaign.slug, name: state.campaign.name });
-    controller = controllerFactory(state, cb, { baseDir, debug });
-    controller.start('resume');
+    session.activeState = state;
+    const cb = session.bridge.attach({ slug: state.campaign.slug, name: state.campaign.name });
+    session.controller = controllerFactory(state, cb, { baseDir: session.saveDir, debug });
+    session.controller.start('resume');
     // Re-snapshots every already-connected client (e.g. another tab/device
     // sitting on the campaigns screen) onto this session -- see bridge.ts's
     // broadcastHello doc comment.
-    bridge.broadcastHello();
+    session.bridge.broadcastHello();
     respondJson(res, 200, {});
   }
 
@@ -319,8 +361,8 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
   }
 
   /** POST /api/new -- create + start a brand-new campaign. Requires no active session (client calls /api/end first). */
-  async function handleNew(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (bridge.hasSession) {
+  async function handleNew(session: Session, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (session.bridge.hasSession) {
       respondJson(res, 409, { error: 'session already running' });
       return;
     }
@@ -351,19 +393,19 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
     try {
       state = createNewCampaign(
         { name, heroName, classId, race, backgroundId, statValues, stats: statsFromOrdered(statValues), themeSeed, contentRating },
-        baseDir,
+        session.saveDir,
       );
     } catch (err) {
       respondJson(res, 400, { error: err instanceof Error ? err.message : 'invalid campaign input' });
       return;
     }
 
-    saveGame(state, baseDir);
-    activeState = state;
-    const cb = bridge.attach({ slug: state.campaign.slug, name: state.campaign.name });
-    controller = controllerFactory(state, cb, { baseDir, debug });
-    controller.start('new');
-    bridge.broadcastHello();
+    saveGame(state, session.saveDir);
+    session.activeState = state;
+    const cb = session.bridge.attach({ slug: state.campaign.slug, name: state.campaign.name });
+    session.controller = controllerFactory(state, cb, { baseDir: session.saveDir, debug });
+    session.controller.start('new');
+    session.bridge.broadcastHello();
     respondJson(res, 200, {});
   }
 
@@ -374,8 +416,8 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
    * confirm step already runs for the TUI -- createNewHero + saveGame + the
    * "A new hero rises" transcript note -- reused here verbatim).
    */
-  async function handleRetire(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (!controller || !activeState) {
+  async function handleRetire(session: Session, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (!session.controller || !session.activeState) {
       respondJson(res, 400, { error: 'no active session' });
       return;
     }
@@ -400,13 +442,13 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
 
     let newState: GameState;
     try {
-      newState = createNewHero(activeState, { heroName, classId, race, backgroundId, statValues, stats: statsFromOrdered(statValues) });
+      newState = createNewHero(session.activeState, { heroName, classId, race, backgroundId, statValues, stats: statsFromOrdered(statValues) });
     } catch (err) {
       respondJson(res, 400, { error: err instanceof Error ? err.message : 'invalid hero input' });
       return;
     }
 
-    saveGame(newState, baseDir);
+    saveGame(newState, session.saveDir);
     const classPreset = CLASS_PRESETS.find((p) => p.id === classId);
     appendTranscript(
       newState.campaign.slug,
@@ -415,25 +457,25 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
         text: `A new hero rises: ${heroName} the ${race} ${classPreset?.name ?? classId}.`,
         ts: new Date().toISOString(),
       },
-      baseDir,
+      session.saveDir,
     );
 
     // Shut the OLD controller down cleanly before swapping the new one in --
     // mirrors /api/end's controller.shutdown(), just without bridge.detach()
     // (bridge.attach() below resets all mirrored state itself, and skipping
     // detach() avoids a window where hasSession would flicker false).
-    await controller.shutdown();
+    await session.controller.shutdown();
 
-    activeState = newState;
-    const cb = bridge.attach({ slug: newState.campaign.slug, name: newState.campaign.name });
-    controller = controllerFactory(newState, cb, { baseDir, debug });
-    controller.start('new-hero');
-    bridge.broadcastHello();
+    session.activeState = newState;
+    const cb = session.bridge.attach({ slug: newState.campaign.slug, name: newState.campaign.name });
+    session.controller = controllerFactory(newState, cb, { baseDir: session.saveDir, debug });
+    session.controller.start('new-hero');
+    session.bridge.broadcastHello();
     respondJson(res, 200, {});
   }
 
-  async function handleAction(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (!controller) {
+  async function handleAction(session: Session, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (!session.controller) {
       respondJson(res, 400, { error: 'no active session' });
       return;
     }
@@ -451,24 +493,24 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
       return;
     }
     if (trimmed.startsWith('/')) {
-      handleSlashCommand(trimmed);
+      handleSlashCommand(session, trimmed);
     } else {
-      controller.submitPlayerAction(trimmed);
+      session.controller.submitPlayerAction(trimmed);
     }
     respondJson(res, 200, {});
   }
 
-  function handleRollConfirm(res: http.ServerResponse): void {
-    if (!controller) {
+  function handleRollConfirm(session: Session, res: http.ServerResponse): void {
+    if (!session.controller) {
       respondJson(res, 400, { error: 'no active session' });
       return;
     }
-    const reveal = controller.confirmRoll() ?? null;
+    const reveal = session.controller.confirmRoll() ?? null;
     respondJson(res, 200, { reveal });
   }
 
-  async function handleRollResolve(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    if (!controller) {
+  async function handleRollResolve(session: Session, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (!session.controller) {
       respondJson(res, 400, { error: 'no active session' });
       return;
     }
@@ -479,30 +521,30 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
       respondJson(res, 400, { error: 'invalid JSON body' });
       return;
     }
-    const reveal = controller.resolvePendingRoll(body.useLuck === true) ?? null;
+    const reveal = session.controller.resolvePendingRoll(body.useLuck === true) ?? null;
     respondJson(res, 200, { reveal });
   }
 
-  async function handleInterrupt(res: http.ServerResponse): Promise<void> {
-    if (!controller) {
+  async function handleInterrupt(session: Session, res: http.ServerResponse): Promise<void> {
+    if (!session.controller) {
       respondJson(res, 400, { error: 'no active session' });
       return;
     }
-    await controller.interrupt();
+    await session.controller.interrupt();
     respondJson(res, 200, {});
   }
 
-  async function handleEnd(res: http.ServerResponse): Promise<void> {
-    if (controller) {
-      await controller.shutdown();
+  async function handleEnd(session: Session, res: http.ServerResponse): Promise<void> {
+    if (session.controller) {
+      await session.controller.shutdown();
     }
-    controller = undefined;
-    activeState = undefined;
-    bridge.detach();
+    session.controller = undefined;
+    session.activeState = undefined;
+    session.bridge.detach();
     respondJson(res, 200, {});
   }
 
-  function handleEvents(req: http.IncomingMessage, res: http.ServerResponse): void {
+  function handleEvents(session: Session, req: http.IncomingMessage, res: http.ServerResponse): void {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
@@ -513,8 +555,11 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
     const send: SseSink = (evt) => {
       res.write(`event: ${evt.event}\ndata: ${JSON.stringify(evt.data)}\n\n`);
     };
-    send({ event: 'hello', data: bridge.hello() });
-    const unsubscribe = bridge.subscribe(send);
+    // Subscribed to THIS player's bridge only. Each GameBridge owns its own
+    // sink set, so a broadcast can never reach another player's stream -- which
+    // is what stops one player's narration leaking into someone else's tab.
+    send({ event: 'hello', data: session.bridge.hello() });
+    const unsubscribe = session.bridge.subscribe(send);
 
     // Keeps phone carriers'/routers' idle-connection timeouts from silently
     // dropping the stream; unref'd so it never by itself keeps the process
@@ -550,31 +595,71 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
           return;
         }
 
-        // Every route below is gated -- SSE can't set headers, so it takes
-        // the pin as a query param instead of the X-Game-Pin header.
-        const providedPin = pathname === '/api/events' ? (url.searchParams.get('pin') ?? undefined) : headerPin(req);
-        // --no-pin mode has no PIN to brute-force, so the limiter is never
-        // even consulted -- checkPin(_, undefined) always succeeds anyway.
-        if (pin !== undefined) {
-          const ip = clientIp(req);
+        // Unauthenticated on purpose, and has to be: the login screen needs to
+        // know what to ask for BEFORE it can ask for it. A 6-digit numeric PIN
+        // field cannot accept a 29-character access code, so the client sizes
+        // and labels its one input from this. It reveals only whether any
+        // player is registered -- no names, no ids, no hashes.
+        if (pathname === '/api/auth-mode' && method === 'GET') {
+          respondJson(res, 200, { mode: hasPlayers(savesRoot) ? 'code' : 'pin' });
+          return;
+        }
+
+        // Every route below is gated. SSE can't set request headers, so it
+        // carries the credential as a query param instead. One header/param
+        // serves both modes: the value is the shared PIN when no players are
+        // registered, and that player's access code once they are.
+        const credential =
+          pathname === '/api/events' ? (url.searchParams.get('pin') ?? undefined) : headerPin(req);
+
+        // Multi-player as soon as the registry has anyone in it (see
+        // scripts/players.ts). Read per-request rather than cached at boot so
+        // adding the first player doesn't need a restart to take effect.
+        const multiPlayer = hasPlayers(savesRoot);
+        const ip = clientIp(req);
+
+        let session: Session;
+        if (multiPlayer) {
+          // The access code is now the only credential; GAME_PIN is ignored,
+          // because a per-player secret is strictly stronger than a shared one.
           if (pinRateLimiter.isLockedOut(ip)) {
-            respondJson(res, 429, { error: 'too many failed PIN attempts -- try again in a minute' });
+            respondJson(res, 429, { error: 'too many failed attempts -- try again in a minute' });
             return;
           }
-          if (!checkPin(providedPin, pin)) {
+          const player = authenticate(savesRoot, credential);
+          if (!player) {
             pinRateLimiter.recordFailure(ip);
-            respondJson(res, 401, { error: 'invalid or missing PIN' });
+            respondJson(res, 401, { error: 'invalid or missing access code' });
             return;
           }
           pinRateLimiter.recordSuccess(ip);
+          session = sessionFor(player.id, playerSavesDir(savesRoot, player.id));
+          touchLastSeen(savesRoot, player.id);
+        } else {
+          // Legacy single-player mode, unchanged: shared PIN, one session.
+          // --no-pin mode has no PIN to brute-force, so the limiter is never
+          // even consulted -- checkPin(_, undefined) always succeeds anyway.
+          if (pin !== undefined) {
+            if (pinRateLimiter.isLockedOut(ip)) {
+              respondJson(res, 429, { error: 'too many failed PIN attempts -- try again in a minute' });
+              return;
+            }
+            if (!checkPin(credential, pin)) {
+              pinRateLimiter.recordFailure(ip);
+              respondJson(res, 401, { error: 'invalid or missing PIN' });
+              return;
+            }
+            pinRateLimiter.recordSuccess(ip);
+          }
+          session = soloSession;
         }
 
         if (pathname === '/api/events' && method === 'GET') {
-          handleEvents(req, res);
+          handleEvents(session, req, res);
           return;
         }
         if (pathname === '/api/campaigns' && method === 'GET') {
-          respondJson(res, 200, listCampaigns(baseDir));
+          respondJson(res, 200, listCampaigns(session.saveDir));
           return;
         }
         if (pathname === '/api/presets' && method === 'GET') {
@@ -586,35 +671,35 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
           return;
         }
         if (pathname === '/api/continue' && method === 'POST') {
-          await handleContinue(req, res);
+          await handleContinue(session, req, res);
           return;
         }
         if (pathname === '/api/new' && method === 'POST') {
-          await handleNew(req, res);
+          await handleNew(session, req, res);
           return;
         }
         if (pathname === '/api/retire' && method === 'POST') {
-          await handleRetire(req, res);
+          await handleRetire(session, req, res);
           return;
         }
         if (pathname === '/api/action' && method === 'POST') {
-          await handleAction(req, res);
+          await handleAction(session, req, res);
           return;
         }
         if (pathname === '/api/roll/confirm' && method === 'POST') {
-          handleRollConfirm(res);
+          handleRollConfirm(session, res);
           return;
         }
         if (pathname === '/api/roll/resolve' && method === 'POST') {
-          await handleRollResolve(req, res);
+          await handleRollResolve(session, req, res);
           return;
         }
         if (pathname === '/api/interrupt' && method === 'POST') {
-          await handleInterrupt(res);
+          await handleInterrupt(session, res);
           return;
         }
         if (pathname === '/api/end' && method === 'POST') {
-          await handleEnd(res);
+          await handleEnd(session, res);
           return;
         }
 
@@ -631,14 +716,20 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
 
   return {
     server,
-    bridge,
+    bridge: soloSession.bridge,
+    // Every live session, not just one: with per-player sessions a SIGTERM has
+    // to give each player's controller its chance to autosave, or whoever
+    // wasn't the "active" one silently loses their last turn.
     shutdown: async () => {
-      if (controller) {
-        await controller.shutdown();
-        controller = undefined;
-        activeState = undefined;
-        bridge.detach();
-      }
+      await Promise.all(
+        [...sessions.values()].map(async (session) => {
+          if (!session.controller) return;
+          await session.controller.shutdown();
+          session.controller = undefined;
+          session.activeState = undefined;
+          session.bridge.detach();
+        }),
+      );
     },
   };
 }
