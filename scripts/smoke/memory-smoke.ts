@@ -8,13 +8,13 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { GameState } from '../src/game/state';
-import { loadGame } from '../src/game/saves';
-import { GameController } from '../src/game/controller';
-import type { ControllerCallbacks, DmSessionLike } from '../src/game/controller';
-import { DmSession } from '../src/ai/dm';
-import type { DmSessionCallbacks, DmSessionConfig } from '../src/ai/dm';
-import { summarizeChunk } from '../src/ai/summarizer';
+import type { GameState } from '../../src/game/state';
+import { loadGame } from '../../src/game/saves';
+import { GameController } from '../../src/game/controller';
+import type { ControllerCallbacks, DmSessionLike } from '../../src/game/controller';
+import { DmSession } from '../../src/ai/dm';
+import type { DmSessionCallbacks, DmSessionConfig } from '../../src/ai/dm';
+import { summarizeChunk } from '../../src/ai/summarizer';
 
 const OVERALL_TIMEOUT_MS = 420_000;
 const CHRONICLE_NOTE_TIMEOUT_MS = 120_000;

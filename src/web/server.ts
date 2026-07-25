@@ -9,6 +9,7 @@
 import * as http from 'node:http';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { GameState, Stats } from '../game/state';
 import { GameController } from '../game/controller';
@@ -162,6 +163,52 @@ class PinRateLimiter {
   }
 }
 
+/**
+ * Single-use, short-lived tickets that let EventSource authenticate without
+ * putting the real credential in a URL.
+ *
+ * The browser's EventSource cannot set request headers, so /api/events
+ * historically took `?pin=<credential>`. Query strings are the one place a
+ * secret reliably leaks by accident: they land in reverse-proxy access logs
+ * (one `log` directive in a Caddyfile away), in tunnel/CDN logs, in browser
+ * history, and in Referer headers. A PIN there was already unlovely; a
+ * long-lived per-player access code there is worse, because it never rotates on
+ * its own.
+ *
+ * So the client POSTs /api/sse-ticket with its normal credential header, gets a
+ * one-shot opaque ticket, and spends it on the EventSource URL. A leaked ticket
+ * is worth nothing: it is deleted on first use and expires in seconds.
+ */
+const SSE_TICKET_TTL_MS = 30_000;
+
+class SseTicketStore {
+  private readonly tickets = new Map<string, { playerId: string; expiresAt: number }>();
+
+  issue(playerId: string): string {
+    this.sweep();
+    const ticket = crypto.randomBytes(24).toString('hex');
+    this.tickets.set(ticket, { playerId, expiresAt: Date.now() + SSE_TICKET_TTL_MS });
+    return ticket;
+  }
+
+  /** Returns the playerId and burns the ticket, or undefined if unknown/expired. */
+  redeem(ticket: string | undefined): string | undefined {
+    if (!ticket) return undefined;
+    const record = this.tickets.get(ticket);
+    if (!record) return undefined;
+    this.tickets.delete(ticket);
+    return Date.now() < record.expiresAt ? record.playerId : undefined;
+  }
+
+  /** Bounded memory without a timer: expired entries are dropped whenever a new one is issued. */
+  private sweep(): void {
+    const now = Date.now();
+    for (const [ticket, record] of this.tickets) {
+      if (now >= record.expiresAt) this.tickets.delete(ticket);
+    }
+  }
+}
+
 /** Collects and JSON-parses a request body; '' body -> {} (routes with no required fields still work). */
 function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
@@ -224,6 +271,7 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
     opts.pinMaxAttempts ?? DEFAULT_PIN_MAX_ATTEMPTS,
     opts.pinLockoutMs ?? DEFAULT_PIN_LOCKOUT_MS,
   );
+  const sseTickets = new SseTicketStore();
 
   /**
    * The effective saves root. saves.ts defaults an undefined baseDir to
@@ -605,18 +653,32 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
           return;
         }
 
-        // Every route below is gated. SSE can't set request headers, so it
-        // carries the credential as a query param instead. One header/param
-        // serves both modes: the value is the shared PIN when no players are
-        // registered, and that player's access code once they are.
-        const credential =
-          pathname === '/api/events' ? (url.searchParams.get('pin') ?? undefined) : headerPin(req);
-
         // Multi-player as soon as the registry has anyone in it (see
-        // scripts/players.ts). Read per-request rather than cached at boot so
+        // scripts/admin/players.ts). Read per-request rather than cached at boot so
         // adding the first player doesn't need a restart to take effect.
         const multiPlayer = hasPlayers(savesRoot);
         const ip = clientIp(req);
+
+        // /api/events authenticates with a single-use ticket instead of the real
+        // credential, so no long-lived secret ever appears in a URL. See
+        // SseTicketStore. `?pin=` is still accepted as a fallback purely so an
+        // already-open tab from a previous build keeps streaming until reload.
+        if (pathname === '/api/events' && method === 'GET') {
+          const ticketPlayer = sseTickets.redeem(url.searchParams.get('ticket') ?? undefined);
+          if (ticketPlayer !== undefined) {
+            const session =
+              ticketPlayer === SOLO_SESSION_ID
+                ? soloSession
+                : sessionFor(ticketPlayer, playerSavesDir(savesRoot, ticketPlayer));
+            handleEvents(session, req, res);
+            return;
+          }
+        }
+
+        // One header/param serves both modes: the value is the shared PIN when
+        // no players are registered, and that player's access code once they are.
+        const credential =
+          pathname === '/api/events' ? (url.searchParams.get('pin') ?? undefined) : headerPin(req);
 
         let session: Session;
         if (multiPlayer) {
@@ -656,6 +718,10 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
 
         if (pathname === '/api/events' && method === 'GET') {
           handleEvents(session, req, res);
+          return;
+        }
+        if (pathname === '/api/sse-ticket' && method === 'POST') {
+          respondJson(res, 200, { ticket: sseTickets.issue(session.playerId) });
           return;
         }
         if (pathname === '/api/campaigns' && method === 'GET') {

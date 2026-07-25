@@ -11,10 +11,10 @@
 // them, but saves written before that still carry them -- hence this.
 //
 // Usage (dry run prints a diff and writes nothing):
-//   npx tsx scripts/fix-item-names.ts
-//   npx tsx scripts/fix-item-names.ts --apply
-//   npx tsx scripts/fix-item-names.ts --apply --saves-dir /home/ubuntu/dnd-ai-saves
-//   npx tsx scripts/fix-item-names.ts --apply --slug "1st and best world"
+//   npx tsx scripts/admin/fix-item-names.ts
+//   npx tsx scripts/admin/fix-item-names.ts --apply
+//   npx tsx scripts/admin/fix-item-names.ts --apply --saves-dir /home/ubuntu/dnd-ai-saves
+//   npx tsx scripts/admin/fix-item-names.ts --apply --slug "1st and best world"
 //
 // --apply writes a timestamped .bak of every file it touches first, and the
 // script is idempotent: re-running it after a successful pass is a no-op.

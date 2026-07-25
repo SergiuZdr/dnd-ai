@@ -1,5 +1,5 @@
 // Owner-run live smoke test for the DUAL referee+narrator DM backend
-// (dmBackend:"dual", src/ai/dualDm.ts). Mirror of scripts/openai-smoke.ts,
+// (dmBackend:"dual", src/ai/dualDm.ts). Mirror of scripts/smoke/openai-smoke.ts,
 // but against DualModelDmSession + a REAL OpenAI-compatible endpoint --
 // proves the referee's tool-calling loop (mechanics) AND the narrator's
 // streamed prose (voice) both work end-to-end against whatever the owner
@@ -20,15 +20,15 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { Engine } from '../src/game/engine';
-import type { EngineResult } from '../src/game/engine';
-import type { GameState } from '../src/game/state';
-import { saveGame, loadGame } from '../src/game/saves';
-import { createDmTools } from '../src/ai/tools';
-import { buildOpeningPrompt, withMechanicsReminder } from '../src/ai/prompts';
-import { DualModelDmSession } from '../src/ai/dualDm';
-import type { DmError } from '../src/ai/dm';
-import { loadSettings } from '../src/game/settings';
+import { Engine } from '../../src/game/engine';
+import type { EngineResult } from '../../src/game/engine';
+import type { GameState } from '../../src/game/state';
+import { saveGame, loadGame } from '../../src/game/saves';
+import { createDmTools } from '../../src/ai/tools';
+import { buildOpeningPrompt, withMechanicsReminder } from '../../src/ai/prompts';
+import { DualModelDmSession } from '../../src/ai/dualDm';
+import type { DmError } from '../../src/ai/dm';
+import { loadSettings } from '../../src/game/settings';
 
 const OVERALL_TIMEOUT_MS = 300_000;
 

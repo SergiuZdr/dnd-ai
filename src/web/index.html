@@ -1089,6 +1089,8 @@
   var session = null; // last 'hello' snapshot, kept up to date by every subsequent event
   var partial = '';
   var evtSource = null;
+  var sseRetryTimer = null;
+  var sseRetryMs = 1000; // grows on repeated failures, reset on a healthy 'open'
   var drawerOpen = false;
   var rollUi = { phase: 'idle', reveal: null }; // 'idle' | 'waiting' | 'rolling' | 'revealed'
   var localNoteCounter = 0; // client-only ids for 'note' events, mirrors the server's own negative-id scheme
@@ -1280,15 +1282,60 @@
 
   // ---------------------------------------------------------------- SSE
 
+  /**
+   * Opens the event stream using a single-use ticket rather than putting the
+   * real credential in the URL, because query strings leak into proxy access
+   * logs, tunnel logs, browser history and Referer headers. EventSource can't
+   * send headers, so the exchange is: POST /api/sse-ticket with the normal
+   * credential header, then spend the one-shot ticket on the stream URL.
+   *
+   * Falls back to `?pin=` if the ticket request fails, so an older server (or a
+   * transient blip) still yields a working stream instead of a dead page.
+   */
   function connectSse() {
+    if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null; }
+    if (evtSource) { evtSource.close(); evtSource = null; }
+    apiFetch('/api/sse-ticket', { method: 'POST', body: '{}' })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (body) {
+        openEventStream(body && body.ticket ? 'ticket=' + encodeURIComponent(body.ticket) : 'pin=' + encodeURIComponent(pin));
+      })
+      .catch(function () {
+        // A 401 has already bounced us to the login screen and cleared `pin`;
+        // retrying then would spin against a credential we know is dead.
+        if (pin) scheduleSseReconnect();
+      });
+  }
+
+  /**
+   * Reconnect is ours now, not EventSource's. Its built-in retry re-requests the
+   * SAME url, and the ticket in that url is single-use -- so after the first
+   * drop (a screen lock, a carrier blip, exactly what this game does all day on
+   * a phone) its automatic retries would 401 forever and the stream would be
+   * quietly dead. Each attempt has to go get a fresh ticket, so we close the
+   * source ourselves and come back through connectSse() with a backoff.
+   */
+  function scheduleSseReconnect() {
+    if (sseRetryTimer) return;
+    sseRetryTimer = setTimeout(function () {
+      sseRetryTimer = null;
+      connectSse();
+    }, sseRetryMs);
+    sseRetryMs = Math.min(sseRetryMs * 2, 15000);
+  }
+
+  function openEventStream(query) {
     if (evtSource) evtSource.close();
-    evtSource = new EventSource('/api/events?pin=' + encodeURIComponent(pin));
+    evtSource = new EventSource('/api/events?' + query);
 
     evtSource.addEventListener('open', function () {
       els.reconnectPill.classList.add('hidden');
+      sseRetryMs = 1000; // healthy again -- forget the accumulated backoff
     });
     evtSource.onerror = function () {
       els.reconnectPill.classList.remove('hidden');
+      if (evtSource) { evtSource.close(); evtSource = null; }
+      scheduleSseReconnect();
     };
 
     evtSource.addEventListener('hello', function (e) {

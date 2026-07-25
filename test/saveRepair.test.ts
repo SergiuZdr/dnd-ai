@@ -1,12 +1,12 @@
 // Tests for the two save-repair utilities' pure cores:
-//   scripts/fix-item-names.ts  -- repairInventory()
-//   scripts/rewind.ts          -- cutIndexForTurns()
+//   scripts/admin/fix-item-names.ts  -- repairInventory()
+//   scripts/admin/rewind.ts          -- cutIndexForTurns()
 // Both scripts guard their own main() behind an isDirectRun check, so importing
 // them here runs no I/O and parses no argv.
 
 import { describe, it, expect } from 'vitest';
-import { repairInventory } from '../scripts/fix-item-names';
-import { cutIndexForTurns } from '../scripts/rewind';
+import { repairInventory } from '../scripts/admin/fix-item-names';
+import { cutIndexForTurns } from '../scripts/admin/rewind';
 
 describe('repairInventory', () => {
   it('moves a count baked into the name into qty, so the item can be spent one at a time', () => {

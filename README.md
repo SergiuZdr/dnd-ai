@@ -239,16 +239,38 @@ See [Choosing the DM model](#choosing-the-dm-model) above — it's controlled by
 ```
 src/
   game/     dice, engine (state mutations + validation), saves + schema migration,
-            character-creation math (classes/races/backgrounds), settings.json loader
-  ai/       Agent SDK session wrapper, DM system prompt + context-brief builder, MCP tool layer, chronicle summarizer
+            character-creation math (classes/races/backgrounds), settings.json loader,
+            players.ts (access-code registry + per-player save namespacing)
+  ai/       DM session backends (Agent SDK, OpenAI-compatible, dual referee+narrator),
+            system prompts + context-brief builder, MCP tool layer, chronicle summarizer
   ui/       ink components: App shell, bounded story log + pure line-wrapping, sidebar,
             input bar, interactive roll prompt, wizard
   web/      phone/web mode: bridge.ts (pure ControllerCallbacks -> SSE-event mirror),
-            server.ts (PIN-gated HTTP/SSE routes over plain `http`, no framework),
+            server.ts (auth-gated HTTP/SSE routes over plain `http`, no framework),
             serve.ts (CLI entry), index.html (single-file mobile UI, no build step)
+
+test/       one file per src module, flat, mirroring the source name. `npm test`
+            runs all of it and makes no AI calls.
+
+docs/       PLAN.md (design writeup), DEPLOY.md (cloud/Oracle/Fly runbook),
+            the SRD/PRD for the pluggable-backend + cloud work, review-log.md
+
+scripts/
+  smoke/    live end-to-end proofs against a REAL model endpoint. These BILL --
+            either your Claude plan or your OpenAI-compatible provider. Never
+            part of `npm test`.
+  admin/    maintenance against saves on disk, all dry-run by default and all
+            backing up before they write: players (access codes), rewind,
+            fix-item-names, migrate-to-players.
+  tunnel.ts `npm run serve:remote` -- the normal server plus a Cloudflare quick
+            tunnel. Neither a smoke test nor an admin tool, so it sits on its own.
 ```
 
-The engine owns every mechanical rule; the AI layer only narrates and calls tools the engine validates. The web server is a second front end on top of the exact same `GameController` the TUI uses — see `src/web/bridge.ts`'s header comment. See `PLAN.md` for the full design writeup.
+`scripts/` is split by consequence rather than by topic: everything under
+`smoke/` costs money when you run it and everything under `admin/` mutates
+saves, so the directory name is the warning.
+
+The engine owns every mechanical rule; the AI layer only narrates and calls tools the engine validates. The web server is a second front end on top of the exact same `GameController` the TUI uses — see `src/web/bridge.ts`'s header comment. See `docs/PLAN.md` for the full design writeup.
 
 - `npm test` — the full vitest suite, no AI calls.
 - `npm run typecheck` — `tsc --noEmit`.

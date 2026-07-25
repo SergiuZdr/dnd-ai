@@ -1,7 +1,7 @@
 // Tests for the "forever" memory system: the pure shouldSummarize threshold
 // check, and the GameController's chronicle-update + session-rotation flow.
 // No real SDK here -- a fake DmSessionLike + a fake summarizeFn stand in for
-// the Agent SDK entirely (see scripts/memory-smoke.ts for the real-SDK proof).
+// the Agent SDK entirely (see scripts/smoke/memory-smoke.ts for the real-SDK proof).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';

@@ -21,9 +21,9 @@
 // script refuses to cut past it unless you pass --force.
 //
 // Usage (dry run writes nothing):
-//   npx tsx scripts/rewind.ts --slug "1st and best world" --turns 5
-//   npx tsx scripts/rewind.ts --slug "1st and best world" --turns 5 --apply
-//   npx tsx scripts/rewind.ts --slug X --turns 5 --apply --saves-dir /home/ubuntu/dnd-ai-saves
+//   npx tsx scripts/admin/rewind.ts --slug "1st and best world" --turns 5
+//   npx tsx scripts/admin/rewind.ts --slug "1st and best world" --turns 5 --apply
+//   npx tsx scripts/admin/rewind.ts --slug X --turns 5 --apply --saves-dir /home/ubuntu/dnd-ai-saves
 //
 // Stop the server before running with --apply: a live GameController holds the
 // campaign in memory and will overwrite your edit on its next autosave.
@@ -76,7 +76,7 @@ function main(): void {
   const { slug, turns, savesDir, apply, force } = parseArgs(process.argv.slice(2));
 
   if (!slug) {
-    console.error('Usage: npx tsx scripts/rewind.ts --slug "<campaign>" --turns 5 [--apply] [--saves-dir <path>]');
+    console.error('Usage: npx tsx scripts/admin/rewind.ts --slug "<campaign>" --turns 5 [--apply] [--saves-dir <path>]');
     process.exit(1);
   }
   if (!Number.isInteger(turns) || turns < 1) {

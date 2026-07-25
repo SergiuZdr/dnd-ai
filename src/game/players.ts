@@ -63,13 +63,49 @@ export function playerSavesDir(baseDir: string, playerId: string): string {
   return path.join(baseDir, PLAYERS_DIR, playerId);
 }
 
+/**
+ * Registry cache, invalidated by the file's own mtime+size.
+ *
+ * Every authenticated request needs the registry at least twice (hasPlayers()
+ * to pick the auth mode, then authenticate() to resolve the code), and it's on
+ * the hot path for actions, rolls and SSE connects. Re-reading and re-parsing
+ * JSON each time is pure waste, but caching without an invalidation check would
+ * mean `players.ts add` didn't take effect until a restart -- and that
+ * no-restart behaviour is deliberate (and tested). A stat() per call is cheap
+ * and gets both.
+ */
+let registryCache: { path: string; mtimeMs: number; size: number; registry: PlayerRegistry } | undefined;
+
 /** Missing/unreadable/corrupt registry reads as "no players registered" rather than throwing -- the server treats that as single-player PIN mode, so a damaged file must not take the whole game down. */
 export function loadPlayers(baseDir: string): PlayerRegistry {
+  const target = registryPath(baseDir);
+  let stat: fs.Stats;
   try {
-    const raw = JSON.parse(fs.readFileSync(registryPath(baseDir), 'utf8')) as PlayersFile;
+    stat = fs.statSync(target);
+  } catch {
+    return { players: [] };
+  }
+  if (
+    registryCache &&
+    registryCache.path === target &&
+    registryCache.mtimeMs === stat.mtimeMs &&
+    registryCache.size === stat.size
+  ) {
+    // A COPY, always. rotateCode/revokePlayer/touchLastSeen all mutate what
+    // they get back, and handing out the cached object would let a caller that
+    // mutates-then-fails leave the cache disagreeing with disk. Cloning a
+    // handful of small rows still avoids the read + JSON.parse, which is the
+    // expensive part.
+    return structuredClone(registryCache.registry);
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(target, 'utf8')) as PlayersFile;
     const players = raw?.data?.players;
-    if (!Array.isArray(players)) return { players: [] };
-    return { players: players.filter((p) => typeof p?.id === 'string' && typeof p?.codeHash === 'string') };
+    const registry: PlayerRegistry = Array.isArray(players)
+      ? { players: players.filter((p) => typeof p?.id === 'string' && typeof p?.codeHash === 'string') }
+      : { players: [] };
+    registryCache = { path: target, mtimeMs: stat.mtimeMs, size: stat.size, registry };
+    return structuredClone(registry);
   } catch {
     return { players: [] };
   }
@@ -84,6 +120,7 @@ export function savePlayers(baseDir: string, registry: PlayerRegistry): void {
   const tmp = `${target}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(file, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, target);
+  registryCache = undefined; // next read re-stats and re-parses
 }
 
 /** Lowercase, filesystem- and URL-safe slug of a display name; falls back to a random suffix if the name has no usable characters at all. */
@@ -201,12 +238,27 @@ export function authenticate(baseDir: string, code: string | undefined): Player 
   return undefined;
 }
 
+/**
+ * How stale "last seen" has to be before a request bothers rewriting it. This
+ * exists because the first version wrote players.json on EVERY authenticated
+ * request -- every action, every roll, every SSE reconnect -- which is a
+ * synchronous read-modify-write on the hot path purely to service a human-
+ * readable column in `players.ts list`. Worse, with two players active the
+ * read-modify-write pairs could interleave and silently drop one player's
+ * timestamp. A minute of granularity is far more than that column needs.
+ */
+const LAST_SEEN_THROTTLE_MS = 60_000;
+
 /** Best-effort "last seen" bookkeeping for the CLI listing; never throws, and a failure to record it must not fail the request that triggered it. */
 export function touchLastSeen(baseDir: string, id: string): void {
   try {
     const registry = loadPlayers(baseDir);
     const player = registry.players.find((p) => p.id === id);
     if (!player) return;
+    if (player.lastSeenAt) {
+      const age = Date.now() - new Date(player.lastSeenAt).getTime();
+      if (Number.isFinite(age) && age >= 0 && age < LAST_SEEN_THROTTLE_MS) return;
+    }
     player.lastSeenAt = new Date().toISOString();
     savePlayers(baseDir, registry);
   } catch {
