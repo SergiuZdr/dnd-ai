@@ -1090,8 +1090,19 @@
   };
 
   var pin = localStorage.getItem(PIN_KEY) || '';
-  /** 'pin' | 'code' -- set by applyAuthMode() from GET /api/auth-mode; only affects wording and the input's shape, never how the credential is sent. */
-  var authMode = 'pin';
+  /**
+   * 'pin' | 'code' -- set by applyAuthMode() from GET /api/auth-mode; affects
+   * wording, the input's shape, and whether keystrokes are sanitised to digits,
+   * never how the credential is sent.
+   *
+   * Defaults to 'code' (the permissive one) so every path fails OPEN: until the
+   * server confirms PIN mode, letters and dashes are accepted. A 'pin' default
+   * meant that a slow or failed /api/auth-mode left the digits-only sanitiser
+   * armed, silently eating an access code as it was typed. A PIN typed into a
+   * permissive field is still a valid PIN; a code typed into a digits-only
+   * field is unrecoverable.
+   */
+  var authMode = 'code';
   var currentScreen = null;
   var session = null; // last 'hello' snapshot, kept up to date by every subsequent event
   var partial = '';
@@ -1157,7 +1168,13 @@
 
   // ---------------------------------------------------------------- PIN screen
 
+  // Sanitising to digits is correct for a 6-digit PIN and fatal for an access
+  // code: this stripped every letter and dash on each keystroke, so
+  // "bad3-115a-..." became "311505" and no code could ever be entered --
+  // regardless of the input's inputmode/pattern/maxlength, which is why
+  // relaxing those attributes alone did nothing. Only enforce it in PIN mode.
   els.pinInput.addEventListener('input', function () {
+    if (authMode !== 'pin') return;
     els.pinInput.value = els.pinInput.value.replace(/\D/g, '').slice(0, 6);
   });
   els.pinInput.addEventListener('keydown', function (e) {
