@@ -315,6 +315,85 @@ describe('SSE isolation (the leak this refactor exists to close)', () => {
   });
 });
 
+describe('deleting a campaign', () => {
+  it("retires the caller's own campaign and drops it from their list", async () => {
+    const alice = addPlayer(baseDir, 'Alice');
+    saveGame(makeState('keep-me', 'Keep Me'), playerSavesDir(baseDir, 'alice'));
+    saveGame(makeState('bin-me', 'Bin Me'), playerSavesDir(baseDir, 'alice'));
+    await start();
+
+    expect((await post('/api/campaign/delete', alice.code, { slug: 'bin-me' })).status).toBe(200);
+    const list = await (await get('/api/campaigns', alice.code)).json();
+    expect(list.map((c: { slug: string }) => c.slug)).toEqual(['keep-me']);
+  });
+
+  it('moves it to .deleted rather than destroying it outright', async () => {
+    const alice = addPlayer(baseDir, 'Alice');
+    saveGame(makeState('bin-me', 'Bin Me'), playerSavesDir(baseDir, 'alice'));
+    await start();
+    await post('/api/campaign/delete', alice.code, { slug: 'bin-me' });
+
+    // Weeks of play should survive a mis-tap: the folder is recoverable by hand.
+    const trash = path.join(playerSavesDir(baseDir, 'alice'), '.deleted');
+    const retired = fs.readdirSync(trash);
+    expect(retired).toHaveLength(1);
+    expect(retired[0]).toMatch(/^bin-me-/);
+    expect(fs.existsSync(path.join(trash, retired[0], 'campaign.json'))).toBe(true);
+  });
+
+  it('never lists .deleted as if it were a campaign', async () => {
+    const alice = addPlayer(baseDir, 'Alice');
+    saveGame(makeState('bin-me', 'Bin Me'), playerSavesDir(baseDir, 'alice'));
+    await start();
+    await post('/api/campaign/delete', alice.code, { slug: 'bin-me' });
+    expect(await (await get('/api/campaigns', alice.code)).json()).toEqual([]);
+  });
+
+  it("cannot be aimed at another player's campaign, even by slug traversal", async () => {
+    const alice = addPlayer(baseDir, 'Alice');
+    const bob = addPlayer(baseDir, 'Bob');
+    saveGame(makeState('precious', 'Alice Precious'), playerSavesDir(baseDir, 'alice'));
+    await start();
+
+    // Plain slug: not in Bob's directory at all.
+    expect((await post('/api/campaign/delete', bob.code, { slug: 'precious' })).status).toBe(404);
+    // Traversal: path.join would happily resolve this into Alice's folder, so
+    // savePaths' containment check is the only thing standing between Bob and
+    // deleting someone else's campaign.
+    for (const slug of ['../alice/precious', '../../players/alice/precious', 'x/../../alice/precious']) {
+      const res = await post('/api/campaign/delete', bob.code, { slug });
+      expect(res.status).toBe(400);
+    }
+    expect(fs.existsSync(path.join(playerSavesDir(baseDir, 'alice'), 'precious', 'campaign.json'))).toBe(true);
+  });
+
+  it('shuts the session down first when deleting the campaign currently being played', async () => {
+    const alice = addPlayer(baseDir, 'Alice');
+    saveGame(makeState('live-one', 'Live One'), playerSavesDir(baseDir, 'alice'));
+    await start();
+    await post('/api/continue', alice.code, { slug: 'live-one' });
+
+    expect((await post('/api/campaign/delete', alice.code, { slug: 'live-one' })).status).toBe(200);
+    // Otherwise a live GameController keeps autosaving and recreates the folder.
+    expect(controllers[0].shutdownCalled).toBe(true);
+    expect(await (await get('/api/campaigns', alice.code)).json()).toEqual([]);
+    expect((await post('/api/action', alice.code, { text: 'hello' })).status).toBe(400);
+  });
+
+  it('404s an unknown slug and 400s a missing one', async () => {
+    const alice = addPlayer(baseDir, 'Alice');
+    await start();
+    expect((await post('/api/campaign/delete', alice.code, { slug: 'nope' })).status).toBe(404);
+    expect((await post('/api/campaign/delete', alice.code, {})).status).toBe(400);
+  });
+
+  it('requires authentication', async () => {
+    addPlayer(baseDir, 'Alice');
+    await start();
+    expect((await post('/api/campaign/delete', 'ffff-ffff-ffff-ffff-ffff-ffff', { slug: 'x' })).status).toBe(401);
+  });
+});
+
 describe('SSE tickets (keeping the access code out of URLs)', () => {
   it('issues a ticket that opens the stream for the right player', async () => {
     const alice = addPlayer(baseDir, 'Alice');

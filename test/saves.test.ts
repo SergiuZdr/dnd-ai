@@ -7,6 +7,7 @@ import {
   saveGame,
   loadGame,
   listCampaigns,
+  deleteCampaign,
   latestCampaign,
   appendTranscript,
   readTranscript,
@@ -450,5 +451,61 @@ describe('saves', () => {
         { role: 'system', text: 'Game started.', ts: '2024-01-01T00:00:00.000Z' },
       ]);
     });
+  });
+});
+
+describe('savePaths containment (multiplayer isolation)', () => {
+  // Per-player isolation works by scoping baseDir to the player's own folder,
+  // so a slug that escapes that folder escapes the isolation. path.join
+  // normalises "../alice/secret" straight into a sibling player's campaign;
+  // this was verified exploitable before the guard existed.
+  let root: string;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-containment-'));
+  });
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("refuses a slug that resolves outside its own save directory", () => {
+    const alice = path.join(root, 'alice');
+    const bob = path.join(root, 'bob');
+    fs.mkdirSync(alice, { recursive: true });
+    fs.mkdirSync(bob, { recursive: true });
+    saveGame(makeState('secret', 'Alice Secret'), alice);
+
+    for (const slug of ['../alice/secret', '../../etc/passwd', 'x/../../alice/secret', '', '.', '/etc']) {
+      expect(() => loadGame(slug, bob)).toThrow(/Invalid campaign slug|outside/);
+    }
+  });
+
+  it('still allows a legitimate slug in the same directory', () => {
+    const bob = path.join(root, 'bob');
+    fs.mkdirSync(bob, { recursive: true });
+    saveGame(makeState('bobs-own', "Bob's Own"), bob);
+    expect(loadGame('bobs-own', bob).campaign.slug).toBe('bobs-own');
+  });
+
+  it('deleteCampaign is protected by the same check', () => {
+    const alice = path.join(root, 'alice');
+    const bob = path.join(root, 'bob');
+    fs.mkdirSync(alice, { recursive: true });
+    fs.mkdirSync(bob, { recursive: true });
+    saveGame(makeState('precious', 'Alice Precious'), alice);
+
+    expect(() => deleteCampaign('../alice/precious', bob)).toThrow(/Invalid campaign slug|outside/);
+    expect(fs.existsSync(path.join(alice, 'precious', 'campaign.json'))).toBe(true);
+  });
+
+  it('deleteCampaign retires a campaign into .deleted, recoverably', () => {
+    const dir = path.join(root, 'solo');
+    fs.mkdirSync(dir, { recursive: true });
+    saveGame(makeState('bin-me', 'Bin Me'), dir);
+
+    const moved = deleteCampaign('bin-me', dir);
+    expect(fs.existsSync(path.join(dir, 'bin-me'))).toBe(false);
+    expect(fs.existsSync(path.join(moved, 'campaign.json'))).toBe(true);
+    expect(listCampaigns(dir)).toEqual([]);
   });
 });

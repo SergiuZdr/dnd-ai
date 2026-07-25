@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import type { GameState, Stats } from '../game/state';
 import { GameController } from '../game/controller';
 import type { ControllerCallbacks, GameControllerOptions, RollRevealResult } from '../game/controller';
-import { loadGame, listCampaigns, saveGame, appendTranscript } from '../game/saves';
+import { loadGame, listCampaigns, saveGame, appendTranscript, deleteCampaign } from '../game/saves';
 import {
   CLASS_PRESETS,
   RACES,
@@ -598,6 +598,47 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
     respondJson(res, 200, {});
   }
 
+  /**
+   * POST /api/campaign/delete -- retire one of the CALLER'S OWN campaigns.
+   *
+   * Scoped to session.saveDir like every other route, and saves.ts's savePaths()
+   * refuses a slug that resolves outside it, so this cannot be aimed at another
+   * player's campaign. If the campaign being deleted is the one currently
+   * loaded, its controller is shut down first -- otherwise a live GameController
+   * would keep autosaving and quietly recreate the directory underneath us.
+   */
+  async function handleDeleteCampaign(session: Session, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    let body: Record<string, unknown>;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      respondJson(res, 400, { error: 'invalid JSON body' });
+      return;
+    }
+    const slug = typeof body.slug === 'string' ? body.slug : undefined;
+    if (!slug) {
+      respondJson(res, 400, { error: 'missing slug' });
+      return;
+    }
+
+    if (session.activeState?.campaign.slug === slug) {
+      if (session.controller) await session.controller.shutdown();
+      session.controller = undefined;
+      session.activeState = undefined;
+      session.bridge.detach();
+      session.bridge.broadcastHello();
+    }
+
+    try {
+      deleteCampaign(slug, session.saveDir);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'could not delete campaign';
+      respondJson(res, /not found/.test(message) ? 404 : 400, { error: message });
+      return;
+    }
+    respondJson(res, 200, {});
+  }
+
   async function handleEnd(session: Session, res: http.ServerResponse): Promise<void> {
     if (session.controller) {
       await session.controller.shutdown();
@@ -778,6 +819,10 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
         }
         if (pathname === '/api/interrupt' && method === 'POST') {
           await handleInterrupt(session, res);
+          return;
+        }
+        if (pathname === '/api/campaign/delete' && method === 'POST') {
+          await handleDeleteCampaign(session, req, res);
           return;
         }
         if (pathname === '/api/end' && method === 'POST') {

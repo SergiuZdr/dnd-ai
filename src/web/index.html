@@ -257,6 +257,46 @@
     margin-left: auto; font-family: var(--font-mono); font-size: .74rem; color: var(--parchment-dim);
     letter-spacing: .06em; white-space: nowrap;
   }
+  .shelf-signout {
+    background: transparent; border: 1px solid var(--border-bright); color: var(--parchment-dim);
+    border-radius: 999px; padding: 7px 14px; font-family: var(--font-display); font-size: .68rem;
+    letter-spacing: .12em; text-transform: uppercase; min-height: 34px; white-space: nowrap;
+    transition: border-color .16s, color .16s;
+  }
+  @media (hover: hover) { .shelf-signout:hover { border-color: var(--brass); color: var(--brass-bright); } }
+
+  /* The card is a <button>, so the delete control cannot be nested inside it --
+     it sits as a sibling in a positioned wrapper instead. */
+  .campaign-slot { position: relative; }
+  .card-delete {
+    position: absolute; top: 9px; right: 9px; z-index: 2;
+    width: 30px; height: 30px; border-radius: 50%; line-height: 1;
+    background: rgba(11,8,6,.55); border: 1px solid var(--border-bright); color: var(--parchment-dim);
+    font-size: .95rem; display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .16s, border-color .16s, color .16s;
+  }
+  /* Always visible on touch, where there is no hover to reveal it. */
+  @media (hover: none) { .card-delete { opacity: .75; } }
+  @media (hover: hover) {
+    .campaign-slot:hover .card-delete, .card-delete:focus-visible { opacity: 1; }
+  }
+  .card-delete:hover { border-color: var(--blood-bright); color: var(--blood-bright); }
+  /* Confirmation replaces the card rather than opening a dialog: the thing being
+     destroyed stays on screen, named, while you decide. */
+  .card-confirm {
+    background: linear-gradient(160deg, #3a1c1f, #241012 70%);
+    border: 1px solid var(--blood); border-radius: 14px; padding: 15px 17px; text-align: left;
+    box-shadow: var(--shadow-inset), 0 6px 14px rgba(0,0,0,.4);
+  }
+  .card-confirm .confirm-q { font-family: var(--font-display); font-size: .95rem; color: var(--parchment); }
+  .card-confirm .confirm-note { color: var(--parchment-dim); font-size: .78rem; font-style: italic; margin-top: 5px; }
+  .card-confirm .confirm-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .card-confirm button {
+    flex: 1; border-radius: 10px; padding: 9px; font-family: var(--font-display);
+    font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; min-height: 40px;
+  }
+  .confirm-yes { background: linear-gradient(180deg, var(--blood-bright), var(--blood)); border: none; color: #2a0a0a; font-weight: 700; }
+  .confirm-no { background: var(--stone-hi); border: 1px solid var(--border-bright); color: var(--parchment); }
   /* Brass rule, not a dashed outline and not a filled slab. Dashed reads as an
      upload dropzone; filled brass is reserved for the in-context primary (Act,
      Roll, Continue), and using it here would out-shout the campaign cards --
@@ -916,6 +956,7 @@
       <div class="brand-die3d" id="brand-die-campaigns"></div>
       <div class="wordmark">Campaigns</div>
       <span class="shelf-count" id="campaign-count"></span>
+      <button class="shelf-signout hidden" id="signout-btn" type="button">Sign out</button>
     </div>
     <button class="new-campaign-btn" id="new-campaign-btn" type="button">Begin a new campaign</button>
     <div class="shelf-label" id="campaign-list-label">Continue</div>
@@ -1052,6 +1093,7 @@
     pinError: document.getElementById('pin-error'),
     campaignList: document.getElementById('campaign-list'),
     campaignCount: document.getElementById('campaign-count'),
+    signoutBtn: document.getElementById('signout-btn'),
     campaignListLabel: document.getElementById('campaign-list-label'),
     newCampaignBtn: document.getElementById('new-campaign-btn'),
     topbarToggle: document.getElementById('topbar-toggle'),
@@ -1228,10 +1270,66 @@
     return crest;
   }
 
+  /**
+   * Forgets the stored credential and returns to the login screen so a
+   * different player can sign in on the same device -- there was previously no
+   * way out of an account at all short of clearing site data by hand.
+   *
+   * Deliberately does NOT end the server-side session: signing out is a client
+   * act, and killing a live game because someone handed the phone over would
+   * lose the turn in flight. The session stays exactly as it would if the tab
+   * were closed, and signing back in resumes it.
+   */
+  function signOut() {
+    if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null; }
+    if (evtSource) { evtSource.close(); evtSource = null; }
+    localStorage.removeItem(PIN_KEY);
+    pin = '';
+    session = null;
+    partial = '';
+    els.feed.innerHTML = '';
+    els.campaignList.innerHTML = '';
+    els.pinInput.value = '';
+    els.pinError.textContent = '';
+    showScreen('pin');
+  }
+  els.signoutBtn.addEventListener('click', signOut);
+
+  /** Swaps a campaign card for an inline confirmation, so the campaign being destroyed stays named and on screen while the player decides. */
+  function confirmDeleteCampaign(slot, campaign) {
+    var confirmBox = el('div', 'card-confirm');
+    confirmBox.appendChild(el('div', 'confirm-q', 'Delete "' + campaign.name + '"?'));
+    confirmBox.appendChild(el('div', 'confirm-note', 'The hero, the world and the whole story log go with it.'));
+
+    var actions = el('div', 'confirm-actions');
+    var yes = el('button', 'confirm-yes', 'Delete');
+    yes.type = 'button';
+    var no = el('button', 'confirm-no', 'Keep');
+    no.type = 'button';
+
+    no.addEventListener('click', function () { loadCampaigns(); });
+    yes.addEventListener('click', function () {
+      yes.disabled = true;
+      yes.textContent = 'Deleting…';
+      postJson('/api/campaign/delete', { slug: campaign.slug })
+        .catch(function () { return null; })
+        .then(function () { loadCampaigns(); });
+    });
+
+    actions.appendChild(yes);
+    actions.appendChild(no);
+    confirmBox.appendChild(actions);
+    slot.innerHTML = '';
+    slot.appendChild(confirmBox);
+  }
+
   function renderCampaignList(list) {
     els.campaignList.innerHTML = '';
     var count = (list && list.length) || 0;
     els.campaignCount.textContent = count === 0 ? '' : count === 1 ? '1 world' : count + ' worlds';
+    // Only meaningful when a credential identifies a person; in single-player
+    // PIN mode there is no other account to switch to.
+    els.signoutBtn.classList.toggle('hidden', authMode !== 'code');
     // The "Continue" rule is a heading for the list below it, so it has nothing
     // to head when there is no list.
     els.campaignListLabel.classList.toggle('hidden', count === 0);
@@ -1265,7 +1363,20 @@
       card.appendChild(body);
 
       card.addEventListener('click', function () { continueCampaign(c.slug); });
-      els.campaignList.appendChild(card);
+
+      var slot = el('div', 'campaign-slot');
+      slot.appendChild(card);
+
+      var del = el('button', 'card-delete', '✕');
+      del.type = 'button';
+      del.setAttribute('aria-label', 'Delete ' + c.name);
+      del.addEventListener('click', function (e) {
+        e.stopPropagation(); // never let the delete tap fall through to "open campaign"
+        confirmDeleteCampaign(slot, c);
+      });
+      slot.appendChild(del);
+
+      els.campaignList.appendChild(slot);
     });
   }
 
