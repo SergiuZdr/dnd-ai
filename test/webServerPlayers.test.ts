@@ -314,3 +314,75 @@ describe('SSE isolation (the leak this refactor exists to close)', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('SSE tickets (keeping the access code out of URLs)', () => {
+  it('issues a ticket that opens the stream for the right player', async () => {
+    const alice = addPlayer(baseDir, 'Alice');
+    saveGame(makeState('alice-camp', 'Alice Campaign'), playerSavesDir(baseDir, 'alice'));
+    await start();
+    await post('/api/continue', alice.code, { slug: 'alice-camp' });
+
+    const { ticket } = await (await post('/api/sse-ticket', alice.code)).json();
+    expect(typeof ticket).toBe('string');
+    expect(ticket).not.toContain(alice.code.slice(0, 4)); // opaque, not a wrapper round the code
+
+    const ac = new AbortController();
+    const res = await fetch(`${baseUrl}/api/events?ticket=${ticket}`, { signal: ac.signal });
+    expect(res.status).toBe(200);
+    const chunk = await res.body!.getReader().read();
+    expect(new TextDecoder().decode(chunk.value)).toContain('connected');
+    ac.abort();
+  });
+
+  it('burns the ticket on first use, so a leaked one is worth nothing', async () => {
+    const alice = addPlayer(baseDir, 'Alice');
+    await start();
+    const { ticket } = await (await post('/api/sse-ticket', alice.code)).json();
+
+    const ac = new AbortController();
+    expect((await fetch(`${baseUrl}/api/events?ticket=${ticket}`, { signal: ac.signal })).status).toBe(200);
+    ac.abort();
+    // Second attempt with the same ticket must not authenticate. This is also
+    // exactly why the client can't rely on EventSource's built-in retry, which
+    // would re-request this identical URL -- see openEventStream/scheduleSseReconnect.
+    expect((await fetch(`${baseUrl}/api/events?ticket=${ticket}`)).status).toBe(401);
+  });
+
+  it('refuses an unknown or forged ticket', async () => {
+    addPlayer(baseDir, 'Alice');
+    await start();
+    expect((await fetch(`${baseUrl}/api/events?ticket=deadbeef`)).status).toBe(401);
+  });
+
+  it("a ticket only ever opens its own issuer's stream", async () => {
+    const alice = addPlayer(baseDir, 'Alice');
+    const bob = addPlayer(baseDir, 'Bob');
+    saveGame(makeState('alice-camp', 'Alice Campaign'), playerSavesDir(baseDir, 'alice'));
+    saveGame(makeState('bob-camp', 'Bob Campaign'), playerSavesDir(baseDir, 'bob'));
+    await start();
+    await post('/api/continue', alice.code, { slug: 'alice-camp' });
+    await post('/api/continue', bob.code, { slug: 'bob-camp' });
+
+    const { ticket } = await (await post('/api/sse-ticket', bob.code)).json();
+    const ac = new AbortController();
+    const res = await fetch(`${baseUrl}/api/events?ticket=${ticket}`, { signal: ac.signal });
+    const text = new TextDecoder().decode((await res.body!.getReader().read()).value);
+    ac.abort();
+    // The hello snapshot must be Bob's campaign, never Alice's.
+    expect(text).not.toContain('Alice Campaign');
+  });
+
+  it('requires a real credential to get a ticket in the first place', async () => {
+    addPlayer(baseDir, 'Alice');
+    await start();
+    expect((await post('/api/sse-ticket', 'ffff-ffff-ffff-ffff-ffff-ffff')).status).toBe(401);
+  });
+
+  it('works in single-player PIN mode too', async () => {
+    await start(); // no players -> solo session
+    const { ticket } = await (await post('/api/sse-ticket', 'ignored-in-multiplayer-mode')).json();
+    const ac = new AbortController();
+    expect((await fetch(`${baseUrl}/api/events?ticket=${ticket}`, { signal: ac.signal })).status).toBe(200);
+    ac.abort();
+  });
+});

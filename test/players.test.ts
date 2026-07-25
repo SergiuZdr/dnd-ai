@@ -199,4 +199,51 @@ describe('touchLastSeen', () => {
   it('is a no-op for an unknown player and never throws', () => {
     expect(() => touchLastSeen(baseDir, 'nobody')).not.toThrow();
   });
+
+  it('throttles, so a burst of requests does not rewrite the registry each time', () => {
+    // This runs on every authenticated request -- actions, rolls, SSE connects.
+    // Unthrottled it was a synchronous read-modify-write on the hot path, and
+    // with two players active the pairs could interleave and drop a timestamp.
+    addPlayer(baseDir, 'Alice');
+    touchLastSeen(baseDir, 'alice');
+    const first = listPlayers(baseDir)[0].lastSeenAt;
+
+    const file = path.join(baseDir, PLAYERS_FILE);
+    const mtimeBefore = fs.statSync(file).mtimeMs;
+    for (let i = 0; i < 25; i++) touchLastSeen(baseDir, 'alice');
+
+    expect(listPlayers(baseDir)[0].lastSeenAt).toBe(first);
+    expect(fs.statSync(file).mtimeMs).toBe(mtimeBefore); // not rewritten at all
+  });
+
+  it('does write again once the timestamp is genuinely stale', () => {
+    const { player } = addPlayer(baseDir, 'Alice');
+    const registry = loadPlayers(baseDir);
+    registry.players[0].lastSeenAt = new Date(Date.now() - 10 * 60_000).toISOString();
+    savePlayers(baseDir, registry);
+
+    touchLastSeen(baseDir, player.id);
+    const after = listPlayers(baseDir)[0].lastSeenAt!;
+    expect(Date.now() - new Date(after).getTime()).toBeLessThan(5_000);
+  });
+});
+
+describe('registry caching', () => {
+  it('picks up a newly added player without needing a restart', () => {
+    // The no-restart switch from PIN mode to code mode depends on this, so the
+    // mtime-based invalidation is load-bearing, not just an optimisation.
+    expect(loadPlayers(baseDir).players).toHaveLength(0);
+    const { code } = addPlayer(baseDir, 'Alice');
+    expect(loadPlayers(baseDir).players).toHaveLength(1);
+    expect(authenticate(baseDir, code)?.id).toBe('alice');
+  });
+
+  it('hands out copies, so a caller mutating the result cannot poison the cache', () => {
+    addPlayer(baseDir, 'Alice');
+    const first = loadPlayers(baseDir);
+    first.players[0].name = 'CLOBBERED';
+    first.players.length = 0;
+    expect(loadPlayers(baseDir).players).toHaveLength(1);
+    expect(loadPlayers(baseDir).players[0].name).toBe('Alice');
+  });
 });

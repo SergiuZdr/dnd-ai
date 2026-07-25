@@ -418,7 +418,14 @@ export class DualModelDmSession {
       // standing pat and we accept whatever comes back either way.
       if (outcomes.length === 0 && !this.retriedEmptyTurn) {
         this.retriedEmptyTurn = true;
-        this.refereeMessages.push({ role: 'assistant', content: stepResult.content });
+        // Never push an empty assistant turn: a model can legitimately stop
+        // with finish_reason:'stop' and no content, and several
+        // OpenAI-compatible providers reject a message whose content is "" --
+        // which would turn a recoverable skipped-tools turn into a hard 400.
+        this.refereeMessages.push({
+          role: 'assistant',
+          content: stepResult.content.length > 0 ? stepResult.content : '(no beat sheet produced)',
+        });
         this.refereeMessages.push({
           role: 'user',
           content:

@@ -7,10 +7,10 @@
 // a player is what makes them private.
 //
 // Usage (dry run prints the plan and moves nothing):
-//   npx tsx scripts/migrate-to-players.ts --owner sergiu
-//   npx tsx scripts/migrate-to-players.ts --owner sergiu --apply
-//   npx tsx scripts/migrate-to-players.ts --owner sergiu --apply --saves-dir /opt/dnd/saves
-//   npx tsx scripts/migrate-to-players.ts --owner sergiu --apply --only "1st and best world"
+//   npx tsx scripts/admin/migrate-to-players.ts --owner sergiu
+//   npx tsx scripts/admin/migrate-to-players.ts --owner sergiu --apply
+//   npx tsx scripts/admin/migrate-to-players.ts --owner sergiu --apply --saves-dir /opt/dnd/saves
+//   npx tsx scripts/admin/migrate-to-players.ts --owner sergiu --apply --only "1st and best world"
 //
 // --apply tars the whole saves tree first. Stop the server before running it:
 // a live GameController holds a campaign open and autosaves to the OLD path.
@@ -18,7 +18,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as childProcess from 'node:child_process';
-import { PLAYERS_DIR, PLAYERS_FILE, listPlayers, playerSavesDir } from '../src/game/players';
+import { PLAYERS_DIR, PLAYERS_FILE, listPlayers, playerSavesDir } from '../../src/game/players';
 
 function arg(argv: string[], flag: string): string | undefined {
   const i = argv.indexOf(flag);
@@ -49,14 +49,14 @@ function main(): void {
   const apply = argv.includes('--apply');
 
   if (!owner) {
-    console.error('Usage: npx tsx scripts/migrate-to-players.ts --owner <playerId> [--only <slug>] [--apply] [--saves-dir <path>]');
+    console.error('Usage: npx tsx scripts/admin/migrate-to-players.ts --owner <playerId> [--only <slug>] [--apply] [--saves-dir <path>]');
     process.exit(1);
   }
 
   const players = listPlayers(baseDir);
   if (players.length === 0) {
     console.error(`No players registered in ${baseDir}. Create one first:`);
-    console.error('  npx tsx scripts/players.ts add "<name>" --saves-dir ' + baseDir);
+    console.error('  npx tsx scripts/admin/players.ts add "<name>" --saves-dir ' + baseDir);
     process.exit(1);
   }
   const target = players.find((p) => p.id === owner);

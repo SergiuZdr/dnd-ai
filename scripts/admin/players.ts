@@ -1,9 +1,9 @@
 // Owner CLI for the web server's player registry (src/game/players.ts).
 //
-//   npx tsx scripts/players.ts list
-//   npx tsx scripts/players.ts add "Sergiu"
-//   npx tsx scripts/players.ts rotate sergiu
-//   npx tsx scripts/players.ts revoke sergiu
+//   npx tsx scripts/admin/players.ts list
+//   npx tsx scripts/admin/players.ts add "Sergiu"
+//   npx tsx scripts/admin/players.ts rotate sergiu
+//   npx tsx scripts/admin/players.ts revoke sergiu
 //
 // All commands accept --saves-dir <path> (default: ./saves; on the deployed
 // host that's whatever SAVES_DIR points at, e.g. /opt/dnd/saves).
@@ -20,7 +20,7 @@ import {
   playerSavesDir,
   revokePlayer,
   rotateCode,
-} from '../src/game/players';
+} from '../../src/game/players';
 
 function parseSavesDir(argv: string[]): string {
   const i = argv.indexOf('--saves-dir');
@@ -66,7 +66,7 @@ function main(): void {
   const baseDir = parseSavesDir(argv);
 
   if (!cmd || cmd === 'help' || cmd === '--help') {
-    console.log('Usage: npx tsx scripts/players.ts <list|add|rotate|revoke> [name|id] [--saves-dir <path>]');
+    console.log('Usage: npx tsx scripts/admin/players.ts <list|add|rotate|revoke> [name|id] [--saves-dir <path>]');
     process.exit(cmd ? 0 : 1);
   }
 
@@ -91,7 +91,7 @@ function main(): void {
   if (cmd === 'add') {
     const name = argv[1];
     if (!name || name.startsWith('--')) {
-      console.error('Usage: npx tsx scripts/players.ts add "<name>"');
+      console.error('Usage: npx tsx scripts/admin/players.ts add "<name>"');
       process.exit(1);
     }
     let result;
@@ -105,7 +105,7 @@ function main(): void {
     if (listPlayers(baseDir).length === 1) {
       console.log('  This is the first player, so the server has just switched from');
       console.log('  shared-PIN mode to per-player access codes. Restart it, and run');
-      console.log('  scripts/migrate-to-players.ts if you have existing campaigns.');
+      console.log('  scripts/admin/migrate-to-players.ts if you have existing campaigns.');
       console.log('');
     }
     return;
@@ -114,7 +114,7 @@ function main(): void {
   if (cmd === 'rotate') {
     const id = argv[1];
     if (!id || id.startsWith('--')) {
-      console.error('Usage: npx tsx scripts/players.ts rotate <id>');
+      console.error('Usage: npx tsx scripts/admin/players.ts rotate <id>');
       process.exit(1);
     }
     const result = rotateCode(baseDir, id);
@@ -130,7 +130,7 @@ function main(): void {
   if (cmd === 'revoke') {
     const id = argv[1];
     if (!id || id.startsWith('--')) {
-      console.error('Usage: npx tsx scripts/players.ts revoke <id>');
+      console.error('Usage: npx tsx scripts/admin/players.ts revoke <id>');
       process.exit(1);
     }
     if (!revokePlayer(baseDir, id)) {
