@@ -629,9 +629,40 @@ export class GameController {
 
   private handleError(err: DmError): void {
     this.clearPendingRollOnAbort();
+
+    // Leave a trace on the SERVER. Previously a failed turn wrote nothing
+    // anywhere: onSystemNote is a transient client event that reconnects never
+    // replay, nothing reaches the transcript, and nothing reaches the process
+    // log -- so a campaign whose opening turn died was undiagnosable after the
+    // fact. journalctl -u dnd.service is the only record an operator has.
+    console.error(
+      `[dm-error] campaign="${this.state.campaign.slug}" kind=${err.kind}: ${err.message}`,
+    );
+
     this.cb.onSystemNote(err.friendly);
+
+    // A failure on the very first turn is the one that strands a player: the
+    // story is empty, the transient note vanishes on reload, and the screen
+    // just sits there with nothing to act on -- which is exactly what happened
+    // to a new campaign that went 40 minutes blank until its owner typed
+    // something in frustration and got a normal reply 7 seconds later. Persist
+    // an entry so the log is never silently empty, and say plainly that typing
+    // anything will start the scene.
+    if (this.storyIsEmpty()) {
+      this.cb.onStoryAppend({
+        id: this.nextStoryId++,
+        kind: 'system',
+        text: `${err.friendly}\n\nThe opening scene never arrived. Type anything below to begin — your campaign is saved and intact.`,
+      });
+    }
+
     this.setBusy(false);
     this.notifyIdle();
+  }
+
+  /** True when the DM has never successfully narrated in this session -- i.e. the opening turn is what just failed. */
+  private storyIsEmpty(): boolean {
+    return this.nextStoryId === 1;
   }
 
   /**

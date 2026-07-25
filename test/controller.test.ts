@@ -375,6 +375,59 @@ describe('GameController interactive player dice rolls', () => {
     expect(cb.onSystemNote).toHaveBeenCalledWith('The weave falters.');
     expect(cb.onBusyChange).toHaveBeenLastCalledWith(false);
   });
+
+  // A new campaign whose opening turn failed left NOTHING anywhere: the
+  // transient note vanishes on reload, nothing reaches the transcript, and
+  // nothing reached the process log -- one sat blank for 40 minutes until its
+  // owner typed something in frustration and got a normal reply 7 seconds
+  // later, and afterwards there was no record to diagnose it from.
+  describe('a failure on the very first turn', () => {
+    it('persists a story entry telling the player how to recover', () => {
+      const cb = makeCallbacks();
+      const controller = new GameController(makeState(), cb);
+
+      (controller as unknown as { handleError: (err: DmError) => void }).handleError(
+        new DmError('rate_limit', 'HTTP 429', 'The weave is exhausted.'),
+      );
+
+      const appended = (cb.onStoryAppend as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+      expect(appended).toHaveLength(1);
+      expect(appended[0].kind).toBe('system');
+      expect(appended[0].text).toContain('The weave is exhausted.');
+      expect(appended[0].text).toMatch(/Type anything below to begin/);
+    });
+
+    it('writes the failure to the server log so it can be diagnosed afterwards', () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const controller = new GameController(makeState(), makeCallbacks());
+        (controller as unknown as { handleError: (err: DmError) => void }).handleError(
+          new DmError('rate_limit', 'HTTP 429 too many requests', 'The weave is exhausted.'),
+        );
+        expect(spy).toHaveBeenCalledTimes(1);
+        const line = String(spy.mock.calls[0][0]);
+        expect(line).toContain('[dm-error]');
+        expect(line).toContain('rate_limit');
+        expect(line).toContain('HTTP 429 too many requests');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('does NOT add the recovery entry once the story has content', () => {
+      const cb = makeCallbacks();
+      const controller = new GameController(makeState(), cb);
+      // Any successful narration first -> this is no longer the opening turn.
+      (controller as unknown as { nextStoryId: number }).nextStoryId = 5;
+
+      (controller as unknown as { handleError: (err: DmError) => void }).handleError(
+        new DmError('unknown', 'boom', 'The weave falters.'),
+      );
+
+      expect(cb.onStoryAppend).not.toHaveBeenCalled();
+      expect(cb.onSystemNote).toHaveBeenCalledWith('The weave falters.');
+    });
+  });
 });
 
 /**
