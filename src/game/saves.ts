@@ -68,8 +68,28 @@ interface SavePaths {
   transcript: string;
 }
 
+/**
+ * Every read and write of a campaign resolves its directory here, which makes
+ * this the one place that can guarantee a slug stays inside its own save root.
+ *
+ * That guarantee is load-bearing for multiplayer: per-player isolation works by
+ * handing each request `playerSavesDir(root, playerId)` as its baseDir, so a
+ * slug that escapes that directory escapes the isolation with it. `path.join`
+ * happily normalises "../alice/secret" into a sibling player's campaign, and
+ * slugs arrive straight from the client on /api/continue, so a plain join let
+ * one player read (and, once deletion exists, destroy) another's saves purely
+ * by asking for a crafted slug. Verified exploitable before this guard existed.
+ *
+ * Throws rather than sanitising: a slug that needed rewriting was not a slug
+ * this server issued, and quietly redirecting it to some neighbouring
+ * directory would be worse than refusing.
+ */
 function savePaths(baseDir: string, slug: string): SavePaths {
-  const dir = path.join(baseDir, slug);
+  const root = path.resolve(baseDir);
+  const dir = path.resolve(root, slug);
+  if (dir === root || !dir.startsWith(root + path.sep)) {
+    throw new Error(`Invalid campaign slug "${slug}": resolves outside its save directory.`);
+  }
   return {
     dir,
     campaign: path.join(dir, 'campaign.json'),
@@ -187,6 +207,9 @@ export function listCampaigns(baseDir: string = defaultBaseDir()): CampaignListi
   const listings: CampaignListing[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
+    // Retired campaigns live one level deeper so they'd be skipped anyway, but
+    // say it outright: .deleted/ is not a campaign and must never be listed.
+    if (entry.name === TRASH_DIR) continue;
     const campaignFile = path.join(baseDir, entry.name, 'campaign.json');
     try {
       const campaign = readJson<Campaign>(campaignFile);
@@ -204,6 +227,34 @@ export function listCampaigns(baseDir: string = defaultBaseDir()): CampaignListi
 
   listings.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
   return listings;
+}
+
+/** Where deleteCampaign() moves retired saves. Dot-prefixed so listCampaigns' directory scan and the migration script both skip it. */
+export const TRASH_DIR = '.deleted';
+
+/**
+ * Retires a campaign by MOVING it into <baseDir>/.deleted/<slug>-<timestamp>/
+ * rather than unlinking it.
+ *
+ * A campaign can represent weeks of play and there is no undo in the UI, so an
+ * irreversible rm on a single mis-tap is the wrong default. A rename is atomic,
+ * instant, and leaves the owner a folder to drag back if they change their
+ * mind. Returns the path it was moved to.
+ *
+ * Goes through savePaths(), so it inherits the containment check -- a crafted
+ * slug cannot reach out of this player's directory and delete someone else's
+ * campaign.
+ */
+export function deleteCampaign(slug: string, baseDir: string = defaultBaseDir()): string {
+  const paths = savePaths(baseDir, slug);
+  if (!fs.existsSync(paths.campaign)) {
+    throw new Error(`Campaign "${slug}" not found.`);
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const destination = path.join(baseDir, TRASH_DIR, `${path.basename(paths.dir)}-${stamp}`);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.renameSync(paths.dir, destination);
+  return destination;
 }
 
 export function latestCampaign(baseDir: string = defaultBaseDir()): CampaignListing | null {
