@@ -249,11 +249,27 @@ function statsFromOrdered(values: number[]): Stats {
   return { str: values[0], dex: values[1], con: values[2], int: values[3], wis: values[4], cha: values[5] };
 }
 
-function serveIndexHtml(res: http.ServerResponse): void {
+/**
+ * The whole client is this one file, so it MUST NOT be heuristically cached.
+ * It previously went out with no cache headers at all, which lets a browser
+ * reuse a stale copy for as long as it likes -- and it did: after the access-code
+ * login shipped, a phone kept rendering the old numbers-only PIN field and no
+ * valid code could be typed into it. There is no build hash to bust here, so
+ * `no-cache` (revalidate every time) plus an ETag off the file's own size+mtime
+ * gives correctness without re-sending 240KB on every load: unchanged file, 304.
+ */
+function serveIndexHtml(req: http.IncomingMessage, res: http.ServerResponse): void {
   try {
-    const html = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(html);
+    const stat = fs.statSync(INDEX_HTML_PATH);
+    const etag = `W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`;
+    const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', ETag: etag };
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, headers);
+      res.end();
+      return;
+    }
+    res.writeHead(200, headers);
+    res.end(fs.readFileSync(INDEX_HTML_PATH, 'utf8'));
   } catch {
     respondJson(res, 500, { error: 'index.html missing' });
   }
@@ -631,7 +647,7 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
         const method = req.method ?? 'GET';
 
         if (pathname === '/' && method === 'GET') {
-          serveIndexHtml(res);
+          serveIndexHtml(req, res);
           return;
         }
 
