@@ -897,8 +897,15 @@
       <div class="brand-die3d" id="brand-die-pin"></div>
       <div class="eyebrow">A Solo Campaign</div>
       <div class="wordmark" style="font-size: 1.7rem;">AI Dungeon Master</div>
-      <div class="subtitle" id="pin-subtitle">Enter the 6-digit PIN shown in your server's terminal.</div>
-      <input id="pin-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" autocomplete="off" />
+      <!-- Neutral until /api/auth-mode resolves, so neither mode flashes the
+           other's wording on first paint. -->
+      <div class="subtitle" id="pin-subtitle">Enter your access code or PIN.</div>
+      <!-- Deliberately permissive by default: applyAuthMode() ADDS the numeric
+           keypad + 6-char cap only once the server confirms PIN mode. The
+           reverse (numeric by default, relaxed for codes) fails closed -- if
+           that one fetch is slow, cached stale, or errors, the player is left
+           with a field that physically cannot accept their access code. -->
+      <input id="pin-input" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="" />
       <button id="pin-submit" class="big-btn">Continue</button>
       <div class="error-text" id="pin-error" aria-live="polite"></div>
     </div>
@@ -2568,22 +2575,35 @@
    * no players registered is exactly the PIN case.
    */
   function applyAuthMode() {
+    var input = els.pinInput;
+    // Code mode is the assumed default (see the input's markup comment), so it
+    // is styled first and only downgraded to the PIN treatment on confirmation.
+    input.classList.add('code-mode');
+    input.setAttribute('maxlength', '48');
+    input.placeholder = 'xxxx-xxxx-xxxx-xxxx-xxxx-xxxx';
+
     return fetch('/api/auth-mode')
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (body) {
-        if (!body || body.mode !== 'code') return;
-        var input = els.pinInput;
-        input.classList.add('code-mode');
-        input.removeAttribute('inputmode');
-        input.removeAttribute('pattern');
-        input.setAttribute('maxlength', '48');
-        input.setAttribute('autocapitalize', 'off');
-        input.setAttribute('spellcheck', 'false');
-        input.placeholder = 'xxxx-xxxx-xxxx-xxxx-xxxx-xxxx';
+        if (!body) return;
+        if (body.mode === 'pin') {
+          input.classList.remove('code-mode');
+          input.setAttribute('inputmode', 'numeric');
+          input.setAttribute('pattern', '[0-9]*');
+          input.setAttribute('maxlength', '6');
+          input.placeholder = '000000';
+          els.pinSubtitle.textContent = "Enter the 6-digit PIN shown in your server's terminal.";
+          authMode = 'pin';
+          return;
+        }
         els.pinSubtitle.textContent = 'Enter your access code. Ask whoever runs the server if you need one.';
         authMode = 'code';
       })
-      .catch(function () { /* keep the PIN default */ });
+      .catch(function () {
+        // Unreachable server: stay permissive. A code can still be typed, and a
+        // PIN is a valid string in a permissive field anyway.
+        els.pinSubtitle.textContent = 'Enter your access code or PIN.';
+      });
   }
 
   function boot() {

@@ -133,6 +133,31 @@ describe('web server: PIN gate', () => {
     expect(body).toContain('<html');
   });
 
+  // Regression: served with no cache headers at all, a browser is free to reuse
+  // index.html indefinitely -- and did, leaving a phone on the pre-access-code
+  // login screen whose numeric field could not accept a valid code.
+  it('tells the browser to revalidate index.html rather than reuse it blindly', async () => {
+    const res = await fetch(`${t.baseUrl}/`);
+    expect(res.headers.get('cache-control')).toContain('no-cache');
+    expect(res.headers.get('etag')).toBeTruthy();
+  });
+
+  it('answers a matching If-None-Match with 304, so revalidation stays cheap', async () => {
+    const first = await fetch(`${t.baseUrl}/`);
+    const etag = first.headers.get('etag')!;
+    await first.text();
+
+    const second = await fetch(`${t.baseUrl}/`, { headers: { 'If-None-Match': etag } });
+    expect(second.status).toBe(304);
+    expect((await second.text()).length).toBe(0);
+  });
+
+  it('sends the full document when the ETag does not match', async () => {
+    const res = await fetch(`${t.baseUrl}/`, { headers: { 'If-None-Match': 'W/"stale-etag"' } });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('<html');
+  });
+
   it('401s a data route with no X-Game-Pin header', async () => {
     const res = await fetch(`${t.baseUrl}/api/campaigns`);
     expect(res.status).toBe(401);
