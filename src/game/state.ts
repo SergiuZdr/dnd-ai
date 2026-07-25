@@ -51,6 +51,8 @@ export interface Quest {
   title: string;
   status: QuestStatus;
   notes: string[];
+  /** DM's short estimate of the payout, e.g. "≈200 gold + a favor". '' / undefined when unknown. */
+  reward?: string;
 }
 
 export interface World {
@@ -89,8 +91,26 @@ export interface GameState {
 }
 
 // v1 -> v2: added Character.luck (default 1), Character.background/backgroundFact
-// (default ''). See saves.ts's migrate* functions for the actual upgrade.
-export const SCHEMA_VERSION = 2;
+// (default ''). v2 -> v3: added Quest.reward (default ''). See saves.ts's
+// migrate* functions for the actual upgrade.
+export const SCHEMA_VERSION = 3;
+
+/**
+ * Structured deltas for a single successful gain/loss tool call (modify_gold,
+ * award_xp, add_item, remove_item) -- see tools.ts's hooks.onLedger and
+ * controller.ts's ControllerCallbacks.onLedgerGain. Lets the web front-end
+ * render a "YOU GAINED" toast without parsing engine message strings.
+ */
+export interface LedgerDelta {
+  /** Signed: + gained, - spent/lost. */
+  gold?: number;
+  /** Always positive (award_xp only). */
+  xp?: number;
+  /** Present ONLY when this xp award caused a level-up (the new level number). */
+  leveledTo?: number;
+  itemsAdded?: { name: string; qty: number }[];
+  itemsRemoved?: { name: string; qty: number }[];
+}
 
 // 5e cumulative XP thresholds, index = level-1 (level 1 -> 0 XP ... level 20 -> 355000)
 export const XP_TABLE: readonly number[] = [

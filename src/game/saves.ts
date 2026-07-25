@@ -11,6 +11,22 @@ export interface CampaignListing {
   slug: string;
   name: string;
   updatedAt: string;
+  /**
+   * Who and where you left off, for the campaign picker. Optional because a
+   * campaign directory can legitimately hold a readable campaign.json but a
+   * missing or corrupt character/world (a half-written new campaign, a
+   * hand-edited save) -- that must still list and still be resumable, just
+   * without the flavour line. Never throws; see listCampaigns().
+   */
+  hero?: {
+    name: string;
+    race: string;
+    className: string;
+    level: number;
+    hp: number;
+    maxHp: number;
+    location: string;
+  };
 }
 
 export interface TranscriptEntry {
@@ -103,6 +119,18 @@ function migrateCharacter(data: unknown, fromVersion: number): Character {
   return character;
 }
 
+// v2 -> v3: every existing Quest gained `reward` (default ''). campaign/
+// character/chronicle shapes are unchanged across v2 -> v3.
+function migrateWorld(data: unknown, fromVersion: number): World {
+  const world = data as World;
+  if (fromVersion < 3) {
+    for (const quest of world.quests) {
+      if (typeof quest.reward !== 'string') quest.reward = '';
+    }
+  }
+  return world;
+}
+
 export function saveGame(state: GameState, baseDir: string = defaultBaseDir()): void {
   state.campaign.updatedAt = new Date().toISOString();
   const paths = savePaths(baseDir, state.campaign.slug);
@@ -117,9 +145,35 @@ export function loadGame(slug: string, baseDir: string = defaultBaseDir()): Game
   return {
     campaign: readJson<Campaign>(paths.campaign),
     character: readJson<Character>(paths.character, migrateCharacter),
-    world: readJson<World>(paths.world),
+    world: readJson<World>(paths.world, migrateWorld),
     chronicle: readJson<Chronicle>(paths.chronicle),
   };
+}
+
+/**
+ * Best-effort hero/location line for the campaign picker. Deliberately
+ * swallows every failure and returns undefined instead: this is decoration for
+ * a list, and a campaign with an unreadable character.json must still be
+ * listed (and resumed) rather than vanish from the picker. Runs the same
+ * migrations as loadGame so an older save still reads.
+ */
+function readHeroSummary(baseDir: string, slug: string): CampaignListing['hero'] {
+  try {
+    const paths = savePaths(baseDir, slug);
+    const character = readJson<Character>(paths.character, migrateCharacter);
+    const world = readJson<World>(paths.world, migrateWorld);
+    return {
+      name: character.name,
+      race: character.race,
+      className: character.className,
+      level: character.level,
+      hp: character.hp,
+      maxHp: character.maxHp,
+      location: world.location,
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export function listCampaigns(baseDir: string = defaultBaseDir()): CampaignListing[] {
@@ -136,7 +190,12 @@ export function listCampaigns(baseDir: string = defaultBaseDir()): CampaignListi
     const campaignFile = path.join(baseDir, entry.name, 'campaign.json');
     try {
       const campaign = readJson<Campaign>(campaignFile);
-      listings.push({ slug: campaign.slug, name: campaign.name, updatedAt: campaign.updatedAt });
+      listings.push({
+        slug: campaign.slug,
+        name: campaign.name,
+        updatedAt: campaign.updatedAt,
+        hero: readHeroSummary(baseDir, campaign.slug),
+      });
     } catch {
       // Tolerate junk directories / unreadable or corrupt campaign files.
       continue;

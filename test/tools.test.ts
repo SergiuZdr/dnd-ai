@@ -50,6 +50,12 @@ function findRollDice(tools: ReturnType<typeof createDmTools>['tools']) {
   return rollDice;
 }
 
+function findTool(tools: ReturnType<typeof createDmTools>['tools'], name: string) {
+  const found = tools.find((t) => t.name === name);
+  if (!found) throw new Error(`${name} tool not found`);
+  return found;
+}
+
 describe('createDmTools roll_dice', () => {
   it('rolls instantly via the engine when no interactiveRoll hook is registered, regardless of roller', async () => {
     const engine = new Engine(makeState());
@@ -172,5 +178,116 @@ describe('createDmTools roll_dice', () => {
     const reasonSchema = (rollDice.inputSchema as any).reason;
     expect(reasonSchema.description).toContain('3-6 words');
     expect(reasonSchema.description.toLowerCase()).toContain('never a full sentence');
+  });
+});
+
+// Each gain/loss tool reports a structured LedgerDelta via hooks.onLedger
+// exactly once per successful call, so the web front-end can render a "YOU
+// GAINED" toast without parsing engine message strings -- see state.ts's
+// LedgerDelta and controller.ts's ControllerCallbacks.onLedgerGain.
+describe('createDmTools ledger events (LedgerDelta)', () => {
+  it('modify_gold emits { gold: delta } on success, and does not fire on a rejected delta', async () => {
+    const engine = new Engine(makeState());
+    const onLedger = vi.fn();
+    const { tools } = createDmTools(engine, { onLedger });
+    const modifyGold = findTool(tools, 'modify_gold');
+
+    await modifyGold.handler({ delta: 25, reason: 'sold loot' }, undefined);
+    expect(onLedger).toHaveBeenCalledExactlyOnceWith({ gold: 25 });
+
+    onLedger.mockClear();
+    await modifyGold.handler({ delta: -100000000, reason: 'huge' }, undefined); // exceeds the engine's magnitude cap -> ok:false
+    expect(onLedger).not.toHaveBeenCalled();
+  });
+
+  it("award_xp emits { xp, leveledTo: undefined } on a normal award, and leveledTo: <new level> on a level-up", async () => {
+    const engine = new Engine(makeState());
+    const onLedger = vi.fn();
+    const { tools } = createDmTools(engine, { onLedger });
+    const awardXp = findTool(tools, 'award_xp');
+
+    await awardXp.handler({ amount: 50 }, undefined);
+    expect(onLedger).toHaveBeenCalledExactlyOnceWith({ xp: 50, leveledTo: undefined });
+    expect(engine.state.character.level).toBe(1);
+
+    onLedger.mockClear();
+    await awardXp.handler({ amount: 300 }, undefined); // crosses the level-2 threshold (cumulative 300 xp)
+    expect(engine.state.character.level).toBe(2);
+    expect(onLedger).toHaveBeenCalledExactlyOnceWith({ xp: 300, leveledTo: 2 });
+  });
+
+  it('add_item emits { itemsAdded: [{ name, qty }] }, defaulting qty to 1 when omitted', async () => {
+    const engine = new Engine(makeState());
+    const onLedger = vi.fn();
+    const { tools } = createDmTools(engine, { onLedger });
+    const addItem = findTool(tools, 'add_item');
+
+    await addItem.handler({ name: 'Silver Key' }, undefined);
+    expect(onLedger).toHaveBeenCalledExactlyOnceWith({ itemsAdded: [{ name: 'Silver Key', qty: 1 }] });
+
+    onLedger.mockClear();
+    await addItem.handler({ name: 'Torch', qty: 3 }, undefined);
+    expect(onLedger).toHaveBeenCalledExactlyOnceWith({ itemsAdded: [{ name: 'Torch', qty: 3 }] });
+  });
+
+  it('remove_item emits { itemsRemoved: [{ name, qty }] }, and does not fire when the removal fails', async () => {
+    const state = makeState();
+    state.character.inventory.push({ name: 'Torch', qty: 2 });
+    const engine = new Engine(state);
+    const onLedger = vi.fn();
+    const { tools } = createDmTools(engine, { onLedger });
+    const removeItem = findTool(tools, 'remove_item');
+
+    await removeItem.handler({ name: 'Torch', qty: 1 }, undefined);
+    expect(onLedger).toHaveBeenCalledExactlyOnceWith({ itemsRemoved: [{ name: 'Torch', qty: 1 }] });
+
+    onLedger.mockClear();
+    await removeItem.handler({ name: 'Nonexistent', qty: 1 }, undefined); // ok:false -- inventory has none of it
+    expect(onLedger).not.toHaveBeenCalled();
+  });
+
+  it('never throws when hooks (or hooks.onLedger specifically) are absent', async () => {
+    const engine = new Engine(makeState());
+    const { tools } = createDmTools(engine); // no hooks object at all
+    const modifyGold = findTool(tools, 'modify_gold');
+    await expect(modifyGold.handler({ delta: 10, reason: 'test' }, undefined)).resolves.toBeDefined();
+
+    const onToolResult = vi.fn();
+    const { tools: tools2 } = createDmTools(engine, { onToolResult }); // hooks present, but no onLedger
+    const addItem = findTool(tools2, 'add_item');
+    await expect(addItem.handler({ name: 'Rope' }, undefined)).resolves.toBeDefined();
+  });
+});
+
+describe('createDmTools upsert_quest reward', () => {
+  it('round-trips a reward string through the tool into engine state', async () => {
+    const engine = new Engine(makeState());
+    const { tools } = createDmTools(engine);
+    const upsertQuest = findTool(tools, 'upsert_quest');
+
+    await upsertQuest.handler({ title: 'Clear the Crypt', status: 'active', reward: '≈200 gold + a favor' }, undefined);
+
+    expect(engine.state.world.quests[0].reward).toBe('≈200 gold + a favor');
+  });
+
+  it('leaves a previously-set reward untouched on an update that omits it', async () => {
+    const engine = new Engine(makeState());
+    const { tools } = createDmTools(engine);
+    const upsertQuest = findTool(tools, 'upsert_quest');
+
+    await upsertQuest.handler({ title: 'Clear the Crypt', status: 'active', reward: '≈200 gold' }, undefined);
+    await upsertQuest.handler({ title: 'Clear the Crypt', status: 'completed' }, undefined);
+
+    expect(engine.state.world.quests[0].reward).toBe('≈200 gold');
+    expect(engine.state.world.quests[0].status).toBe('completed');
+  });
+
+  it('schema describes the reward field so the DM knows to keep it short', () => {
+    const engine = new Engine(makeState());
+    const { tools } = createDmTools(engine);
+    const upsertQuest = findTool(tools, 'upsert_quest');
+    const rewardSchema = (upsertQuest.inputSchema as any).reward;
+    expect(rewardSchema.description.toLowerCase()).toContain('estimate');
+    expect(rewardSchema.description).toContain('8 words');
   });
 });

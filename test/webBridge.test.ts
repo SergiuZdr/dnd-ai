@@ -234,6 +234,63 @@ describe('GameBridge roll lifecycle mirroring', () => {
   });
 });
 
+describe('GameBridge ledger events (onLedgerGain -> "ledger" SSE event)', () => {
+  it('broadcasts a "ledger" event with the delta verbatim', () => {
+    const bridge = new GameBridge();
+    const cb = bridge.attach({ slug: 'bridge-test', name: 'Bridge Test' });
+    const events = collect(bridge);
+
+    cb.onLedgerGain?.({ gold: 50, itemsAdded: [{ name: 'Silver Key', qty: 1 }] });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual({
+      event: 'ledger',
+      data: { gold: 50, itemsAdded: [{ name: 'Silver Key', qty: 1 }] },
+    });
+  });
+
+  it('is transient like onSystemNote -- never replayed by hello() for a fresh connection', () => {
+    const bridge = new GameBridge();
+    const cb = bridge.attach({ slug: 'bridge-test', name: 'Bridge Test' });
+
+    cb.onLedgerGain?.({ xp: 100, leveledTo: 3 });
+
+    const snapshot = bridge.hello();
+    expect(JSON.stringify(snapshot)).not.toContain('leveledTo');
+    expect(Object.keys(snapshot)).toEqual(['campaign', 'entries', 'state', 'busy', 'pendingRoll', 'diceMessage']);
+  });
+});
+
+describe('GameBridge.broadcastHello', () => {
+  it('broadcasts a fresh "hello" event with the current snapshot to every connected client', () => {
+    const bridge = new GameBridge();
+    const cb = bridge.attach({ slug: 'bridge-test', name: 'Bridge Test' });
+    cb.onStoryAppend({ id: 1, kind: 'dm', text: 'Welcome.' });
+    cb.onBusyChange(true);
+
+    const events = collect(bridge);
+    bridge.broadcastHello();
+
+    expect(events).toHaveLength(1);
+    expect(events[0].event).toBe('hello');
+    expect(events[0].data).toEqual(bridge.hello());
+    expect((events[0].data as { busy: boolean }).busy).toBe(true);
+  });
+
+  it('reflects a session change (e.g. after a fresh attach()) to clients that were already connected', () => {
+    const bridge = new GameBridge();
+    bridge.attach({ slug: 'first', name: 'First' });
+    const events = collect(bridge);
+
+    bridge.detach();
+    bridge.attach({ slug: 'second', name: 'Second' });
+    bridge.broadcastHello();
+
+    expect(events).toHaveLength(1);
+    expect((events[0].data as { campaign: unknown }).campaign).toEqual({ slug: 'second', name: 'Second' });
+  });
+});
+
 describe('GameBridge.appendSystemEntry (local slash-command results)', () => {
   it('appends a system-kind StoryEntry, broadcasts it as a normal "story" event, and persists it in hello()', () => {
     const bridge = new GameBridge();

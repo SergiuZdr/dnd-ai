@@ -119,6 +119,11 @@ export class GameBridge {
         this.entries.push(...replayed);
         this.broadcast({ event: 'replay', data: { entries: replayed } });
       },
+      // Transient, like onSystemNote's 'note' event -- never stored, so
+      // hello() never replays a stale toast at a reconnecting client.
+      onLedgerGain: (delta) => {
+        this.broadcast({ event: 'ledger', data: delta });
+      },
     };
   }
 
@@ -165,6 +170,18 @@ export class GameBridge {
       pendingRoll: this.pendingRoll,
       diceMessage: this.diceMessage,
     };
+  }
+
+  /**
+   * Broadcasts a fresh `hello` snapshot to every currently-connected client --
+   * server.ts calls this right after controller.start() on continue/new/
+   * retire so already-open tabs (on this device or another) re-snapshot onto
+   * the new/loaded session instead of only learning about it on their next
+   * reconnect. A brand-new SSE connection still gets its own hello from
+   * handleEvents() unchanged; this is purely for sessions already listening.
+   */
+  broadcastHello(): void {
+    this.broadcast({ event: 'hello', data: this.hello() });
   }
 
   /** Registers a new SSE client sink; returns an unsubscribe function (server.ts calls it on `req.on('close', ...)`). */

@@ -10,10 +10,10 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createGameServer } from '../src/web/server';
-import type { GameServerHandle, GameControllerLike } from '../src/web/server';
+import type { GameServerHandle, GameControllerLike, GameServerOptions } from '../src/web/server';
 import type { GameState } from '../src/game/state';
 import type { ControllerCallbacks, RollRevealResult } from '../src/game/controller';
-import { saveGame } from '../src/game/saves';
+import { saveGame, readTranscript } from '../src/game/saves';
 
 function makeState(slug: string, name: string): GameState {
   return {
@@ -91,7 +91,7 @@ interface TestServer {
   baseDir: string;
 }
 
-async function startTestServer(pin?: string): Promise<TestServer> {
+async function startTestServer(pin?: string, extra: Partial<GameServerOptions> = {}): Promise<TestServer> {
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-web-server-'));
   const controllers: FakeController[] = [];
   const handle = createGameServer({
@@ -102,6 +102,7 @@ async function startTestServer(pin?: string): Promise<TestServer> {
       controllers.push(controller);
       return controller;
     },
+    ...extra,
   });
   await new Promise<void>((resolve) => handle.server.listen(0, '127.0.0.1', () => resolve()));
   const port = (handle.server.address() as AddressInfo).port;
@@ -186,6 +187,60 @@ describe('web server: --no-pin mode', () => {
   it('allows data routes through with no X-Game-Pin header at all', async () => {
     const res = await fetch(`${t.baseUrl}/api/campaigns`);
     expect(res.status).toBe(200);
+  });
+});
+
+describe('web server: PIN brute-force lockout', () => {
+  let t: TestServer;
+  beforeEach(async () => {
+    // Small maxAttempts/long-ish lockoutMs -- the lockout must still be in
+    // effect by the time the test's follow-up assertions run, but 3 attempts
+    // keeps the test itself fast.
+    t = await startTestServer(PIN, { pinMaxAttempts: 3, pinLockoutMs: 60_000 });
+  });
+  afterEach(async () => {
+    await stopTestServer(t);
+  });
+
+  it('locks the IP out after N consecutive failures, 429ing even a subsequently-correct PIN', async () => {
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch(`${t.baseUrl}/api/campaigns`, { headers: { 'X-Game-Pin': 'wrong' } });
+      expect(res.status).toBe(401);
+    }
+    const lockedOutWrong = await fetch(`${t.baseUrl}/api/campaigns`, { headers: { 'X-Game-Pin': 'wrong' } });
+    expect(lockedOutWrong.status).toBe(429);
+
+    // Even the RIGHT pin is refused while locked out -- the lockout is
+    // per-IP, not "did this exact request guess right."
+    const lockedOutCorrect = await fetch(`${t.baseUrl}/api/campaigns`, { headers: { 'X-Game-Pin': PIN } });
+    expect(lockedOutCorrect.status).toBe(429);
+  });
+
+  it('resets the failure counter on a successful auth, so it takes a fresh N failures to lock out again', async () => {
+    // Two failures (one under the max of 3) -- not locked out yet.
+    expect((await fetch(`${t.baseUrl}/api/campaigns`, { headers: { 'X-Game-Pin': 'wrong' } })).status).toBe(401);
+    expect((await fetch(`${t.baseUrl}/api/campaigns`, { headers: { 'X-Game-Pin': 'wrong' } })).status).toBe(401);
+
+    // A successful auth in between should wipe those two failures out.
+    expect((await fetch(`${t.baseUrl}/api/campaigns`, { headers: { 'X-Game-Pin': PIN } })).status).toBe(200);
+
+    // Two more failures post-reset still shouldn't trip the lockout (would
+    // have been the 4th/5th consecutive failure if the counter hadn't reset).
+    expect((await fetch(`${t.baseUrl}/api/campaigns`, { headers: { 'X-Game-Pin': 'wrong' } })).status).toBe(401);
+    expect((await fetch(`${t.baseUrl}/api/campaigns`, { headers: { 'X-Game-Pin': 'wrong' } })).status).toBe(401);
+    expect((await fetch(`${t.baseUrl}/api/campaigns`, { headers: { 'X-Game-Pin': PIN } })).status).toBe(200);
+  });
+
+  it('never rate-limits in --no-pin mode', async () => {
+    const open = await startTestServer(undefined, { pinMaxAttempts: 1, pinLockoutMs: 60_000 });
+    try {
+      for (let i = 0; i < 5; i++) {
+        const res = await fetch(`${open.baseUrl}/api/campaigns`);
+        expect(res.status).toBe(200);
+      }
+    } finally {
+      await stopTestServer(open);
+    }
   });
 });
 
@@ -422,6 +477,232 @@ describe('web server: dice roll routes', () => {
     const res = await fetch(`${t.baseUrl}/api/interrupt`, { method: 'POST' });
     expect(res.status).toBe(200);
     expect(t.controllers[0].interrupted).toBe(true);
+  });
+});
+
+describe('web server: GET /api/presets', () => {
+  let t: TestServer;
+  beforeEach(async () => {
+    t = await startTestServer(undefined);
+  });
+  afterEach(async () => {
+    await stopTestServer(t);
+  });
+
+  it('derives classes/races/backgrounds/themes/standardArray from newCampaign.ts presets, not hardcoded client data', async () => {
+    const res = await fetch(`${t.baseUrl}/api/presets`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(Array.isArray(body.classes)).toBe(true);
+    const fighter = body.classes.find((c: { id: string }) => c.id === 'fighter');
+    expect(fighter).toMatchObject({ id: 'fighter', name: 'Fighter', hitBase: 10, keyStat: 'STR' });
+    expect(typeof fighter.tagline).toBe('string');
+    expect(fighter.tagline.length).toBeGreaterThan(0);
+    expect(fighter.kit).toEqual(['Sword', 'Shield', 'Chainmail', 'Rations ×5']);
+
+    expect(Array.isArray(body.races)).toBe(true);
+    expect(body.races[0]).toHaveProperty('id');
+    expect(body.races[0]).toHaveProperty('name');
+    expect(body.races[0]).toHaveProperty('description');
+
+    expect(Array.isArray(body.backgrounds)).toBe(true);
+    expect(body.backgrounds.length).toBeGreaterThan(0);
+
+    expect(Array.isArray(body.themes)).toBe(true);
+    expect(body.themes.some((th: { id: string }) => th.id === 'custom')).toBe(true);
+
+    expect(body.standardArray).toEqual([15, 14, 13, 12, 10, 8]);
+  });
+
+  it('is gated by the PIN like every other data route', async () => {
+    const gated = await startTestServer('123456');
+    try {
+      const res = await fetch(`${gated.baseUrl}/api/presets`);
+      expect(res.status).toBe(401);
+    } finally {
+      await stopTestServer(gated);
+    }
+  });
+});
+
+describe('web server: POST /api/roll-stats', () => {
+  let t: TestServer;
+  beforeEach(async () => {
+    t = await startTestServer(undefined);
+  });
+  afterEach(async () => {
+    await stopTestServer(t);
+  });
+
+  it('returns six values, each a valid 4d6-drop-lowest roll (3-18)', async () => {
+    const res = await fetch(`${t.baseUrl}/api/roll-stats`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.values).toHaveLength(6);
+    for (const v of body.values) {
+      expect(Number.isInteger(v)).toBe(true);
+      expect(v).toBeGreaterThanOrEqual(3);
+      expect(v).toBeLessThanOrEqual(18);
+    }
+  });
+
+  it('is server-authoritative -- a second call may reroll to different values (the client can "reroll")', async () => {
+    const first = await (await fetch(`${t.baseUrl}/api/roll-stats`, { method: 'POST' })).json();
+    const second = await (await fetch(`${t.baseUrl}/api/roll-stats`, { method: 'POST' })).json();
+    // Not a hard guarantee (could coincidentally match), but astronomically
+    // unlikely across 6 independent 4d6-drop-lowest rolls.
+    expect(first.values).not.toEqual(second.values);
+  });
+});
+
+describe('web server: POST /api/new', () => {
+  let t: TestServer;
+  beforeEach(async () => {
+    t = await startTestServer(undefined);
+  });
+  afterEach(async () => {
+    await stopTestServer(t);
+  });
+
+  function validNewBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      name: 'My Campaign',
+      heroName: 'Theron',
+      classId: 'fighter',
+      race: 'Human',
+      statValues: [15, 14, 13, 12, 10, 8],
+      themeSeed: 'classic high fantasy',
+      contentRating: 'PG-13',
+      ...overrides,
+    };
+  }
+
+  it('creates + saves a brand-new campaign, starts the controller in "new" mode, and broadcasts a fresh hello', async () => {
+    const res = await fetch(`${t.baseUrl}/api/new`, { method: 'POST', body: JSON.stringify(validNewBody()) });
+    expect(res.status).toBe(200);
+    expect(t.controllers).toHaveLength(1);
+    expect(t.controllers[0].startedWith).toBe('new');
+    expect(t.controllers[0].state.character.name).toBe('Theron');
+    expect(t.controllers[0].state.character.className).toBe('Fighter');
+    expect(t.controllers[0].state.world.theme).toBe('classic high fantasy');
+    expect(t.handle.bridge.hasSession).toBe(true);
+
+    const listRes = await fetch(`${t.baseUrl}/api/campaigns`);
+    const list = await listRes.json();
+    expect(list.some((c: { name: string }) => c.name === 'My Campaign')).toBe(true);
+  });
+
+  it('409s when a session is already active, and constructs no second controller', async () => {
+    await fetch(`${t.baseUrl}/api/new`, { method: 'POST', body: JSON.stringify(validNewBody()) });
+    const second = await fetch(`${t.baseUrl}/api/new`, {
+      method: 'POST',
+      body: JSON.stringify(validNewBody({ name: 'Second Campaign' })),
+    });
+    expect(second.status).toBe(409);
+    expect(t.controllers).toHaveLength(1);
+  });
+
+  it('400s on a missing required field', async () => {
+    const res = await fetch(`${t.baseUrl}/api/new`, {
+      method: 'POST',
+      body: JSON.stringify(validNewBody({ heroName: undefined })),
+    });
+    expect(res.status).toBe(400);
+    expect(t.controllers).toHaveLength(0);
+  });
+
+  it('400s on an unrecognized classId', async () => {
+    const res = await fetch(`${t.baseUrl}/api/new`, {
+      method: 'POST',
+      body: JSON.stringify(validNewBody({ classId: 'not-a-class' })),
+    });
+    expect(res.status).toBe(400);
+    expect(t.controllers).toHaveLength(0);
+  });
+
+  it('400s on a malformed statValues (wrong length)', async () => {
+    const res = await fetch(`${t.baseUrl}/api/new`, {
+      method: 'POST',
+      body: JSON.stringify(validNewBody({ statValues: [15, 14, 13] })),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('defaults contentRating to PG-13 when omitted', async () => {
+    const body = validNewBody();
+    delete body.contentRating;
+    const res = await fetch(`${t.baseUrl}/api/new`, { method: 'POST', body: JSON.stringify(body) });
+    expect(res.status).toBe(200);
+    expect(t.controllers[0].state.campaign.contentRating).toBe('PG-13');
+  });
+});
+
+describe('web server: POST /api/retire', () => {
+  let t: TestServer;
+  beforeEach(async () => {
+    t = await startTestServer(undefined);
+    saveGame(makeState('camp-a', 'Campaign A'), t.baseDir);
+    await fetch(`${t.baseUrl}/api/continue`, { method: 'POST', body: JSON.stringify({ slug: 'camp-a' }) });
+  });
+  afterEach(async () => {
+    await stopTestServer(t);
+  });
+
+  function validRetireBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      heroName: 'Lyra',
+      classId: 'rogue',
+      race: 'Elf',
+      statValues: [15, 14, 13, 12, 10, 8],
+      ...overrides,
+    };
+  }
+
+  it('shuts the old controller down, starts a fresh "new-hero" session in the same world, and broadcasts a fresh hello', async () => {
+    const res = await fetch(`${t.baseUrl}/api/retire`, { method: 'POST', body: JSON.stringify(validRetireBody()) });
+    expect(res.status).toBe(200);
+
+    expect(t.controllers[0].shutdownCalled).toBe(true);
+    expect(t.controllers).toHaveLength(2);
+    expect(t.controllers[1].startedWith).toBe('new-hero');
+    expect(t.controllers[1].state.character.name).toBe('Lyra');
+    expect(t.controllers[1].state.character.className).toBe('Rogue');
+    expect(t.controllers[1].state.campaign.slug).toBe('camp-a'); // same persistent world
+    expect(t.handle.bridge.hasSession).toBe(true);
+  });
+
+  it('appends an "A new hero rises" system transcript note naming the new hero', async () => {
+    await fetch(`${t.baseUrl}/api/retire`, { method: 'POST', body: JSON.stringify(validRetireBody()) });
+    const transcript = readTranscript('camp-a', t.baseDir);
+    const note = transcript.find((e) => e.role === 'system' && e.text.includes('A new hero rises'));
+    expect(note).toBeDefined();
+    expect(note?.text).toContain('Lyra');
+  });
+
+  it('400s when there is no active session', async () => {
+    await fetch(`${t.baseUrl}/api/end`, { method: 'POST' });
+    const res = await fetch(`${t.baseUrl}/api/retire`, { method: 'POST', body: JSON.stringify(validRetireBody()) });
+    expect(res.status).toBe(400);
+    expect(t.controllers).toHaveLength(1); // no new controller constructed
+  });
+
+  it('400s on missing/invalid fields (e.g. a malformed statValues), leaving the original session untouched', async () => {
+    const res = await fetch(`${t.baseUrl}/api/retire`, {
+      method: 'POST',
+      body: JSON.stringify(validRetireBody({ statValues: [1, 2] })),
+    });
+    expect(res.status).toBe(400);
+    expect(t.controllers).toHaveLength(1);
+    expect(t.controllers[0].shutdownCalled).toBe(false);
+  });
+
+  it('400s on an unrecognized classId', async () => {
+    const res = await fetch(`${t.baseUrl}/api/retire`, {
+      method: 'POST',
+      body: JSON.stringify(validRetireBody({ classId: 'not-a-class' })),
+    });
+    expect(res.status).toBe(400);
   });
 });
 

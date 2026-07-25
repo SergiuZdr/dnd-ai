@@ -18,7 +18,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { GameState } from './state';
+import type { GameState, LedgerDelta } from './state';
 import { Engine, formatRollDetail } from './engine';
 import type { EngineResult } from './engine';
 import type { RollResult } from './dice';
@@ -27,15 +27,21 @@ import type { InteractiveRollRequest } from '../ai/tools';
 import { dmSystemPrompt, buildOpeningPrompt, buildContextBrief, buildNewHeroPrompt, withMechanicsReminder } from '../ai/prompts';
 import { DmSession } from '../ai/dm';
 import type { DmError, DmSessionCallbacks, DmSessionConfig } from '../ai/dm';
+import { OpenAiDmSession } from '../ai/openaiDm';
+import { DualModelDmSession } from '../ai/dualDm';
 import { summarizeChunk } from '../ai/summarizer';
 import { saveGame, appendTranscript, readTranscript } from './saves';
 import type { TranscriptEntry } from './saves';
+import { loadSettings } from './settings';
 
 export interface StoryEntry {
   id: number;
   kind: 'player' | 'dm' | 'system';
   text: string;
 }
+
+/** Re-exported so callers can import it from either state.ts (its home) or here alongside ControllerCallbacks. */
+export type { LedgerDelta };
 
 /** A player-triggered dice roll awaiting SPACE/Enter in the UI. Mirrors InteractiveRollRequest (ai/tools.ts) minus nothing -- kept as a separate type so the UI layer never has to import from ai/. */
 export type PendingRollRequest = InteractiveRollRequest;
@@ -84,6 +90,15 @@ export interface ControllerCallbacks {
   onStateChange: (state: GameState) => void;
   onDiceRoll: (message: string) => void;
   onToolActivity?: (toolName: string) => void;
+  /**
+   * Fires once per successful gain/loss tool call (modify_gold / award_xp /
+   * add_item / remove_item) with a structured delta -- see LedgerDelta.
+   * Optional (unlike the contract's plain-required signature) so existing
+   * ControllerCallbacks implementers (the ink TUI's App.tsx, out of this
+   * subagent's scope) keep compiling unchanged; GameBridge implements it,
+   * App.tsx simply omits it and gets no ledger toasts for now.
+   */
+  onLedgerGain?: (delta: LedgerDelta) => void;
   onBusyChange: (busy: boolean) => void;
   /** Friendly errors, rate-limit notes, interrupt confirmations. */
   onSystemNote: (note: string) => void;
@@ -157,6 +172,31 @@ export function shouldSummarize(
   return totalChars >= thresholdChars || unsummarized.length >= thresholdEntries;
 }
 
+/**
+ * The real (non-test) sessionFactory: reads settings.json's `dmBackend` and
+ * constructs the matching DmSessionLike. 'claude' (the default, so a
+ * settings.json that predates P1 -- or has none at all -- behaves exactly
+ * as before) builds the existing Agent SDK-backed DmSession; 'openai' builds
+ * OpenAiDmSession (src/ai/openaiDm.ts), which drives an OpenAI-compatible
+ * endpoint instead; 'dual' builds DualModelDmSession (src/ai/dualDm.ts),
+ * which splits mechanics (a reliable tool-calling "referee" model) from
+ * narration (a separate, more permissive "narrator" model) across the same
+ * endpoint. All three share the exact same DmSessionConfig/
+ * DmSessionCallbacks shape, so nothing else here needs to know which one it
+ * got back.
+ *
+ * Exported (in addition to being GameController's own default sessionFactory
+ * value) so a test can exercise the dmBackend -> class selection directly
+ * without needing a full GameController + real settings.json on disk --
+ * see test/defaultSessionFactory.test.ts.
+ */
+export function defaultSessionFactory(config: DmSessionConfig, callbacks: DmSessionCallbacks): DmSessionLike {
+  const { settings } = loadSettings();
+  if (settings.dmBackend === 'dual') return new DualModelDmSession(config, callbacks);
+  if (settings.dmBackend === 'openai') return new OpenAiDmSession(config, callbacks);
+  return new DmSession(config, callbacks);
+}
+
 export class GameController {
   private readonly state: GameState;
   private readonly cb: ControllerCallbacks;
@@ -217,7 +257,7 @@ export class GameController {
     this.summarizeThresholdChars = opts?.summarizeThresholdChars ?? DEFAULT_SUMMARIZE_THRESHOLD_CHARS;
     this.summarizeThresholdEntries = opts?.summarizeThresholdEntries ?? DEFAULT_SUMMARIZE_THRESHOLD_ENTRIES;
     this.summarizerModel = opts?.summarizerModel;
-    this.sessionFactory = opts?.sessionFactory ?? ((config, callbacks) => new DmSession(config, callbacks));
+    this.sessionFactory = opts?.sessionFactory ?? ((config, callbacks) => defaultSessionFactory(config, callbacks));
     this.summarizeFn = opts?.summarizeFn ?? summarizeChunk;
     this.debug = opts?.debug ?? false;
   }
@@ -232,7 +272,16 @@ export class GameController {
     };
     this.engine = engine;
 
-    const { server, allowedTools } = createDmTools(engine, {
+    // Push the current state to the UI immediately, before any turn runs.
+    // Character/world state otherwise only reaches the UI as a side effect of a
+    // tool call (engine.onMutation), so on a `resume` -- which deliberately
+    // takes NO DM turn -- the sidebar/top bar would stay empty until the player
+    // sent a first message and the DM happened to mutate something. Emitting it
+    // here means opening a save shows the full character panel on load, for
+    // every mode (also lets the web bridge include state in its broadcastHello).
+    this.cb.onStateChange(this.state);
+
+    const { server, allowedTools, tools } = createDmTools(engine, {
       onToolResult: (name, result) => {
         if (name === 'roll_dice' && result.ok) {
           this.cb.onDiceRoll(result.message);
@@ -245,13 +294,24 @@ export class GameController {
         this.cb.onToolActivity?.(name);
       },
       interactiveRoll: (request) => this.handleInteractiveRoll(request),
+      onLedger: (delta) => this.cb.onLedgerGain?.(delta),
     });
 
     this.sessionConfig = {
       systemPrompt: dmSystemPrompt(this.state.campaign.contentRating),
       server,
       allowedTools,
+      tools,
       model: this.state.campaign.modelOverride,
+      // Unused by DmSession/OpenAiDmSession (both bake contentRating into
+      // systemPrompt above already) -- carried for DualModelDmSession
+      // (src/ai/dualDm.ts), which builds its own separate referee/narrator
+      // system prompts and needs contentRating on its own to do so.
+      contentRating: this.state.campaign.contentRating,
+      // Likewise dual-only: its narrator has no tools and no engine handle, so
+      // it needs the real post-turn numbers to narrate against. Read lazily
+      // (not captured) so it always reflects the tool calls just applied.
+      stateSnapshot: () => this.state,
     };
     this.sessionCallbacks = {
       onDelta: (text) => this.handleDelta(text),
@@ -265,9 +325,9 @@ export class GameController {
     this.session = this.sessionFactory(this.sessionConfig, this.sessionCallbacks);
 
     this.session.start();
-    this.setBusy(true);
 
     if (mode === 'new') {
+      this.setBusy(true);
       this.session.send(buildOpeningPrompt(this.state));
       return;
     }
@@ -291,10 +351,30 @@ export class GameController {
     this.cb.onHistoryReplay(replayed);
 
     const brief = buildContextBrief(this.state, transcript);
+
     if (mode === 'new-hero') {
+      this.setBusy(true);
       this.session.send(`${brief}\n\n${buildNewHeroPrompt(this.state)}`);
-    } else {
+      return;
+    }
+
+    // mode === 'resume': the player already saw their exact prior scene via
+    // the replay above -- generating a fresh "next second" DM turn on top of
+    // it is exactly the unwanted behavior this fix removes. Hold the brief
+    // as pendingBrief (same mechanism the chronicle-rotation path already
+    // uses) so it rides along with -- and is only spent by -- the player's
+    // NEXT action (see sendToSession); leave the session idle in the
+    // meantime. EXCEPTION: if the player quit right after acting and the DM
+    // never got to answer (the last player/dm transcript line is a PLAYER
+    // line), that action must not be silently dropped -- send the brief now
+    // so the DM answers it, same as before this fix.
+    const lastPlayerOrDm = [...unsummarized].reverse().find((entry) => entry.role === 'player' || entry.role === 'dm');
+    if (lastPlayerOrDm?.role === 'player') {
+      this.setBusy(true);
       this.session.send(brief);
+    } else {
+      this.pendingBrief = brief;
+      this.setBusy(false);
     }
   }
 

@@ -1,0 +1,27 @@
+# Keep the build context small and never bake local secrets/state into the
+# image -- everything the cloud needs comes from env vars/secrets (see
+# Dockerfile + docs/DEPLOY.md), not from files copied in at build time.
+node_modules
+saves
+.git
+.gitignore
+
+*.log
+dist
+
+# Local-only machine preference (gitignored too) -- the cloud configures the
+# DM backend entirely via DND_* env vars, so no settings.json is needed.
+settings.json
+
+# Secrets -- never bake a key into an image layer.
+.env
+.env.*
+
+# Docs aren't needed at runtime, and may contain screenshots.
+docs/**/*.png
+docs/**/*.jpg
+docs/**/*.jpeg
+docs/**/*.gif
+docs/**/*.webp
+
+.DS_Store

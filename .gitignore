@@ -4,3 +4,8 @@ saves/
 dist/
 settings.json
 .DS_Store
+
+# Secrets (P2 cloud deploy: GAME_PIN / OPENROUTER_API_KEY / etc. are set via
+# real env vars or `fly secrets`, never committed) -- see docs/DEPLOY.md.
+.env
+.env.*

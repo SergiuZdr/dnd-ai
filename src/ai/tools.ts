@@ -8,6 +8,7 @@ import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from '@anth
 import { z } from 'zod';
 import type { Engine, EngineResult } from '../game/engine';
 import type { RollMode } from '../game/dice';
+import type { LedgerDelta } from '../game/state';
 
 export interface InteractiveRollRequest {
   expr: string;
@@ -26,6 +27,15 @@ export interface ToolHooks {
    * tests, no UI): those always get the old instant-roll behavior.
    */
   interactiveRoll?: (request: InteractiveRollRequest) => Promise<EngineResult>;
+  /**
+   * Fires exactly once per successful (result.ok) modify_gold / award_xp /
+   * add_item / remove_item call, with a structured delta describing what just
+   * changed -- the controller wires this straight to
+   * ControllerCallbacks.onLedgerGain so the web front-end can render a "YOU
+   * GAINED" toast without parsing engine message strings. Never fires for a
+   * failed (ok:false) result.
+   */
+  onLedger?: (delta: LedgerDelta) => void;
 }
 
 const SERVER_NAME = 'dnd';
@@ -134,6 +144,12 @@ export function createDmTools(
     async ({ amount }) => {
       const result = engine.awardXp(amount);
       hooks?.onToolResult?.('award_xp', result);
+      if (result.ok) {
+        hooks?.onLedger?.({
+          xp: amount,
+          leveledTo: result.events.includes('level-up') ? engine.state.character.level : undefined,
+        });
+      }
       return toCallToolResult(result);
     },
   );
@@ -149,20 +165,26 @@ export function createDmTools(
     async ({ delta, reason }) => {
       const result = engine.modifyGold(delta);
       hooks?.onToolResult?.('modify_gold', result);
+      if (result.ok) hooks?.onLedger?.({ gold: delta });
       return toCallToolResult(result);
     },
   );
 
   const addItem = tool(
     'add_item',
-    'Call the moment the hero gains a possession — loot, a purchase, a gift, something crafted or found.',
+    'Call the moment the hero gains a possession — loot, a purchase, a gift, something crafted or found. ' +
+      'Put the COUNT IN qty AND NEVER IN name: five healing tinctures are name:"Healing tincture", qty:5 — ' +
+      'never name:"Healing tinctures (5 bottles)", qty:1. A count baked into the name cannot be spent: ' +
+      'remove_item matches on the exact name, so consuming one of them would either delete the whole stack ' +
+      'or fail outright. Keep names singular and generic for the same reason, so a later remove_item can match.',
     {
-      name: z.string(),
+      name: z.string().describe('Singular item name with NO count in it, e.g. "Healing tincture" — the count belongs in qty.'),
       qty: z.number().int().optional(),
     },
     async ({ name, qty }) => {
       const result = engine.addItem(name, qty);
       hooks?.onToolResult?.('add_item', result);
+      if (result.ok) hooks?.onLedger?.({ itemsAdded: [{ name, qty: qty ?? 1 }] });
       return toCallToolResult(result);
     },
   );
@@ -177,6 +199,7 @@ export function createDmTools(
     async ({ name, qty }) => {
       const result = engine.removeItem(name, qty);
       hooks?.onToolResult?.('remove_item', result);
+      if (result.ok) hooks?.onLedger?.({ itemsRemoved: [{ name, qty: qty ?? 1 }] });
       return toCallToolResult(result);
     },
   );
@@ -184,14 +207,22 @@ export function createDmTools(
   const upsertQuest = tool(
     'upsert_quest',
     'Call whenever a quest starts, advances, or ends: set its current status and, optionally, ' +
-      'a short note of what just changed.',
+      'a short note of what just changed. Whenever a quest becomes/updates to active, ALWAYS also ' +
+      "pass a short reward estimate (e.g. '≈200 gold + a favor') so the player can see what's at stake.",
     {
       title: z.string(),
       status: z.enum(['active', 'completed', 'failed', 'abandoned']),
       note: z.string().optional(),
+      reward: z
+        .string()
+        .optional()
+        .describe(
+          'Short estimate of what the hero can expect from this quest, e.g. "≈200 gold + a favor" or ' +
+            '"~150 gold, minor loot, and XP". Keep it under ~8 words. Revise it if the deal changes.',
+        ),
     },
-    async ({ title, status, note }) => {
-      const result = engine.upsertQuest(title, status, note);
+    async ({ title, status, note, reward }) => {
+      const result = engine.upsertQuest(title, status, note, reward);
       hooks?.onToolResult?.('upsert_quest', result);
       return toCallToolResult(result);
     },
