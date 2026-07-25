@@ -30,8 +30,11 @@ export interface DiceLineProps {
 }
 
 const DIE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
-const ANIMATION_MS = 700;
-const ANIMATION_FRAME_MS = 80;
+// Slowed from 700/80 -- the terminal roll felt rushed next to the web
+// client's ~1.2-1.6s BG3-style d20 reveal; this is deprecated-terminal
+// polish only, kept in the same ballpark for a comparably weighty pause.
+const ANIMATION_MS = 1500;
+const ANIMATION_FRAME_MS = 100;
 
 type Phase = 'idle' | 'waiting' | 'animating' | 'revealed';
 

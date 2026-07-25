@@ -438,6 +438,43 @@ describe('Engine', () => {
     it('rejects an empty title', () => {
       expect(engine.upsertQuest('   ', 'active').ok).toBe(false);
     });
+
+    it('sets reward on creation, trimmed', () => {
+      const result = engine.upsertQuest('Clear the Crypt', 'active', undefined, '  ≈200 gold + a favor  ');
+      expect(result.ok).toBe(true);
+      expect(engine.state.world.quests[0].reward).toBe('≈200 gold + a favor');
+    });
+
+    it('leaves reward undefined when none is passed on creation', () => {
+      engine.upsertQuest('Mystery Quest', 'active');
+      expect(engine.state.world.quests[0].reward).toBeUndefined();
+    });
+
+    it('overwrites reward on update when a non-empty reward is passed', () => {
+      engine.upsertQuest('Find the Amulet', 'active', undefined, '≈200 gold');
+      engine.upsertQuest('find the amulet', 'active', undefined, '≈500 gold + a blessing');
+      expect(engine.state.world.quests[0].reward).toBe('≈500 gold + a blessing');
+    });
+
+    it('does NOT overwrite an existing reward when the update omits reward or passes an empty/whitespace one', () => {
+      engine.upsertQuest('Find the Amulet', 'active', undefined, '≈200 gold');
+      engine.upsertQuest('find the amulet', 'completed'); // no reward arg at all
+      expect(engine.state.world.quests[0].reward).toBe('≈200 gold');
+      engine.upsertQuest('find the amulet', 'completed', undefined, '   '); // whitespace-only
+      expect(engine.state.world.quests[0].reward).toBe('≈200 gold');
+    });
+
+    it('round-trips a quest reward through status changes and notes together', () => {
+      engine.upsertQuest('Slay the Dragon', 'active', 'Spotted its lair', '≈1000 gold + a magic item');
+      const quest = engine.state.world.quests[0];
+      expect(quest.reward).toBe('≈1000 gold + a magic item');
+      expect(quest.notes).toEqual(['Spotted its lair']);
+
+      engine.upsertQuest('Slay the Dragon', 'completed', 'The dragon is slain!');
+      expect(engine.state.world.quests[0].status).toBe('completed');
+      expect(engine.state.world.quests[0].reward).toBe('≈1000 gold + a magic item'); // untouched
+      expect(engine.state.world.quests[0].notes).toEqual(['Spotted its lair', 'The dragon is slain!']);
+    });
   });
 
   describe('upsertNpc', () => {

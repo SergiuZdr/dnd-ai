@@ -1,0 +1,54 @@
+# fly.toml -- always-on cloud deploy (SRD Phase P2). See docs/DEPLOY.md for
+# the full walkthrough. `fly launch --no-deploy` will offer to overwrite/
+# regenerate this file -- if it does, re-apply the [mounts]/[http_service]/
+# [env] settings below (or just keep this file and skip the interactive
+# prompts that would replace it).
+#
+# Everything here is either a non-secret config value ([env]) or infra
+# shape ([mounts]/[http_service]/[[vm]]). The two real secrets --
+# OPENROUTER_API_KEY and GAME_PIN -- are deliberately NOT in this file; set
+# them with `fly secrets set` (see docs/DEPLOY.md). settings.json is never
+# needed on the server at all: DND_DM_BACKEND/DND_OPENAI_* below fully
+# configure the DM backend via src/game/settings.ts's env overrides.
+
+app = "dnd-ai"          # rename to whatever `fly launch` reserves for you
+primary_region = "iad"  # pick the region closest to you/your players
+
+[build]
+
+[env]
+  HOST = "0.0.0.0"
+  SAVES_DIR = "/data/saves"
+  DND_DM_BACKEND = "openai"
+  DND_OPENAI_BASE_URL = "https://openrouter.ai/api/v1"
+  # Placeholder -- swap for whatever capable model you've proven with
+  # `npm run smoke:openai` (the P1 PRD's spike found small/free models too
+  # weak for reliable tool-calling; a 70B-class instruct model is a safe
+  # starting point).
+  DND_OPENAI_MODEL = "meta-llama/llama-3.1-70b-instruct"
+
+# Persistent volume for saves/ -- survives restarts and redeploys. Create it
+# once with `fly volumes create data --size 1` (1 GB is generous for JSON
+# saves) before the first `fly deploy`; the mount destination below must
+# match SAVES_DIR above.
+[[mounts]]
+  source = "data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3123       # must match serve.ts's PORT (default 3123)
+  force_https = true
+  # Always-on, no sleep-to-zero -- a phone reconnecting an SSE stream (the
+  # game's /api/events) after a cold start is a bad "laptop off, play from
+  # anywhere" experience. This trades away the auto-stop machines that would
+  # make Fly's allowance stretch furthest; see docs/DEPLOY.md for the
+  # genuinely-free Oracle Always-Free VM alternative if that matters more
+  # than Fly's convenience.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

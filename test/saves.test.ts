@@ -255,6 +255,84 @@ describe('saves', () => {
     });
   });
 
+  describe('schema migration (v2 -> v3): Quest.reward', () => {
+    /** Writes a hand-built v2 (pre-reward) save: quests present but missing the `reward` field. */
+    function writeV2Save(slug: string, quests: Array<Record<string, unknown>>): void {
+      const dir = path.join(baseDir, slug);
+      fs.mkdirSync(dir, { recursive: true });
+      const campaign = {
+        slug,
+        name: 'V2 Save',
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        contentRating: 'PG-13',
+      };
+      const character = {
+        name: 'Hero',
+        className: 'Fighter',
+        race: 'Human',
+        background: '',
+        backgroundFact: '',
+        level: 1,
+        xp: 0,
+        hp: 12,
+        maxHp: 12,
+        ac: 15,
+        stats: { str: 16, dex: 12, con: 14, int: 10, wis: 10, cha: 10 },
+        gold: 10,
+        inventory: [],
+        luck: 1,
+      };
+      const world = { theme: 'classic fantasy', location: 'Old Town', npcs: [], quests, facts: [] };
+      const chronicle = { storySoFar: '', chapters: [], lastSummarizedIndex: 0 };
+      fs.writeFileSync(path.join(dir, 'campaign.json'), JSON.stringify({ schemaVersion: 2, data: campaign }));
+      fs.writeFileSync(path.join(dir, 'character.json'), JSON.stringify({ schemaVersion: 2, data: character }));
+      fs.writeFileSync(path.join(dir, 'world.json'), JSON.stringify({ schemaVersion: 2, data: world }));
+      fs.writeFileSync(path.join(dir, 'chronicle.json'), JSON.stringify({ schemaVersion: 2, data: chronicle }));
+    }
+
+    it('defaults reward to "" for every quest when loading a pre-reward (v2) world save', () => {
+      writeV2Save('legacy-v2-quests', [
+        { title: 'Find the Amulet', status: 'active', notes: ['Started the search'] },
+        { title: 'Slay the Dragon', status: 'completed', notes: [] },
+      ]);
+
+      const loaded = loadGame('legacy-v2-quests', baseDir);
+
+      expect(loaded.world.quests).toHaveLength(2);
+      expect(loaded.world.quests[0].reward).toBe('');
+      expect(loaded.world.quests[1].reward).toBe('');
+      // Everything else from the old save comes through untouched.
+      expect(loaded.world.quests[0].title).toBe('Find the Amulet');
+      expect(loaded.world.quests[0].notes).toEqual(['Started the search']);
+    });
+
+    it('does not clobber reward if a v2 file somehow already had it (defensive, should not happen in practice)', () => {
+      writeV2Save('legacy-v2-quests-with-reward', [
+        { title: 'Odd Quest', status: 'active', notes: [], reward: '≈50 gold' },
+      ]);
+
+      const loaded = loadGame('legacy-v2-quests-with-reward', baseDir);
+      expect(loaded.world.quests[0].reward).toBe('≈50 gold');
+    });
+
+    it('handles an empty quests array without error', () => {
+      writeV2Save('legacy-v2-no-quests', []);
+      const loaded = loadGame('legacy-v2-no-quests', baseDir);
+      expect(loaded.world.quests).toEqual([]);
+    });
+
+    it('re-saving a migrated world persists schemaVersion 3 with reward included on disk', () => {
+      writeV2Save('legacy-v2-resave', [{ title: 'Find the Amulet', status: 'active', notes: [] }]);
+      const loaded = loadGame('legacy-v2-resave', baseDir);
+      saveGame(loaded, baseDir);
+
+      const raw = JSON.parse(fs.readFileSync(path.join(baseDir, 'legacy-v2-resave', 'world.json'), 'utf8'));
+      expect(raw.schemaVersion).toBe(SCHEMA_VERSION);
+      expect(raw.data.quests[0].reward).toBe('');
+    });
+  });
+
   describe('listCampaigns / latestCampaign', () => {
     it('lists campaigns newest-updated first and tolerates junk entries', () => {
       const older = makeState('older-campaign', 'Older Campaign');
@@ -288,6 +366,45 @@ describe('saves', () => {
       const missingDir = path.join(baseDir, 'does-not-exist');
       expect(listCampaigns(missingDir)).toEqual([]);
       expect(latestCampaign(missingDir)).toBeNull();
+    });
+
+    it('summarises the hero and location so the picker can show who you left off as', () => {
+      const state = makeState('with-hero', 'With Hero');
+      state.character.hp = 7;
+      state.world.location = 'The Rusty Anchor';
+      saveGame(state, baseDir);
+
+      const [listing] = listCampaigns(baseDir);
+      expect(listing.hero).toEqual({
+        name: 'Hero',
+        race: 'Human',
+        className: 'Fighter',
+        level: 1,
+        hp: 7,
+        maxHp: state.character.maxHp,
+        location: 'The Rusty Anchor',
+      });
+    });
+
+    it('still lists a campaign whose character/world files are missing or corrupt, just without a hero', () => {
+      const readable = makeState('readable', 'Readable');
+      saveGame(readable, baseDir);
+
+      const corrupt = makeState('corrupt-hero', 'Corrupt Hero');
+      saveGame(corrupt, baseDir);
+      fs.writeFileSync(path.join(baseDir, 'corrupt-hero', 'character.json'), '{ not json');
+
+      const missing = makeState('missing-hero', 'Missing Hero');
+      saveGame(missing, baseDir);
+      fs.rmSync(path.join(baseDir, 'missing-hero', 'world.json'));
+
+      const bySlug = new Map(listCampaigns(baseDir).map((l) => [l.slug, l]));
+      // The whole point: a broken hero file degrades the card, it does not
+      // remove the campaign from the picker or make it unresumable.
+      expect([...bySlug.keys()].sort()).toEqual(['corrupt-hero', 'missing-hero', 'readable']);
+      expect(bySlug.get('corrupt-hero')?.hero).toBeUndefined();
+      expect(bySlug.get('missing-hero')?.hero).toBeUndefined();
+      expect(bySlug.get('readable')?.hero?.name).toBe('Hero');
     });
   });
 

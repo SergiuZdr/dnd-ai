@@ -203,6 +203,26 @@ describe('createNewCampaign', () => {
     expect(state.character.ac).toBe(16 + Math.max(0, Math.min(2, dexMod)));
   });
 
+  it('honors an explicit `stats` assignment verbatim instead of auto-sorting by class priority', () => {
+    // Fighter would normally send its highest value to STR; here the player has
+    // deliberately assigned the pool differently (the web wizard's manual map).
+    const state = createNewCampaign(
+      {
+        name: 'Handpicked',
+        heroName: 'Theron',
+        classId: 'fighter',
+        race: 'Human', // +1 to every ability
+        statValues: STANDARD_ARRAY,
+        stats: { str: 8, dex: 15, con: 12, int: 14, wis: 10, cha: 13 },
+        themeSeed: 'classic high fantasy',
+      },
+      baseDir,
+    );
+
+    // Used exactly as given (NOT re-sorted to str-highest), with Human's +1 on top.
+    expect(state.character.stats).toEqual({ str: 9, dex: 16, con: 13, int: 15, wis: 11, cha: 14 });
+  });
+
   it('floors maxHp at 1 even when hitBase + conMod would go non-positive', () => {
     const state = createNewCampaign(
       {

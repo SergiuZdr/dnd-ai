@@ -400,7 +400,7 @@ describe('GameController history replay on resume', () => {
     async end(): Promise<void> {}
   }
 
-  it('replays only the un-summarized tail (transcript.slice(lastSummarizedIndex)), mapped role->kind, BEFORE session.send()', () => {
+  it('replays only the un-summarized tail (transcript.slice(lastSummarizedIndex)), mapped role->kind, and does NOT send to the session (DM-terminated tail)', () => {
     const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-replay-'));
     try {
       const state = makeState();
@@ -425,8 +425,9 @@ describe('GameController history replay on resume', () => {
       ]);
       // The already-summarized first entry (index 0) is NOT replayed.
       expect(replayed.some((e) => e.text === 'Welcome. What do you do?')).toBe(false);
-      // Called before session.send(), not after.
-      expect(calls).toEqual(['replay', 'send']);
+      // The tail ends on a DM line -- the player already saw this exact scene,
+      // so resume must NOT generate a fresh "next second" DM turn on top of it.
+      expect(calls).toEqual(['replay']);
     } finally {
       fs.rmSync(baseDir, { recursive: true, force: true });
     }
@@ -450,11 +451,11 @@ describe('GameController history replay on resume', () => {
       const replayedIds = replayed.map((e) => e.id);
       expect(new Set(replayedIds).size).toBe(replayedIds.length); // no duplicate ids among the replay itself
 
-      // start() leaves busy=true (a turn is in flight); force it idle to
-      // exercise submitPlayerAction's id assignment without a full
-      // turn-complete round trip -- this gate is guard logic only (see the
-      // other busy-guard tests above), unrelated to what's being proven here.
-      (controller as unknown as { busy: boolean }).busy = false;
+      // This tail ends on a DM line, so start('resume') already leaves the
+      // controller idle (busy=false) -- see the dedicated resume/busy tests
+      // below. Asserting that isn't the point of this test, so no manual
+      // busy override is needed before exercising submitPlayerAction's id
+      // assignment.
       controller.submitPlayerAction('I check my pockets.');
 
       const liveAppended = vi.mocked(cb.onStoryAppend).mock.calls.map(([entry]) => entry);
@@ -498,6 +499,116 @@ describe('GameController history replay on resume', () => {
       controller.start('new');
 
       expect(cb.onHistoryReplay).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * Bug fix: resuming used to immediately bill a fresh, unwanted "what happens
+ * next" DM turn on top of the just-replayed scene (see the describe block
+ * above). resume must instead show the player's exact last scene (already
+ * covered by the replay tests) and then WAIT -- the DM only speaks again once
+ * the player actually does something. The one exception is a tail that ends
+ * on a player line with no DM reply yet (they quit right after acting): that
+ * pending action must not be silently dropped, so resume sends the brief
+ * immediately in that case, same as the old behavior.
+ */
+describe('GameController resume: show-and-wait vs. send-immediately', () => {
+  class RecordingSession implements DmSessionLike {
+    sentMessages: string[] = [];
+    busy = false;
+    start(): void {}
+    send(text: string): void {
+      this.sentMessages.push(text);
+    }
+    async interrupt(): Promise<void> {}
+    async end(): Promise<void> {}
+  }
+
+  function startResume(
+    tailEntries: Array<{ role: 'player' | 'dm'; text: string }>,
+  ): { controller: GameController; cb: ControllerCallbacks; session: RecordingSession; baseDir: string } {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-resume-contract-'));
+    const state = makeState();
+    tailEntries.forEach((entry, i) => {
+      appendTranscript(state.campaign.slug, { role: entry.role, text: entry.text, ts: `t${i}` }, baseDir);
+    });
+
+    const cb = makeCallbacks();
+    let session!: RecordingSession;
+    const sessionFactory = () => {
+      session = new RecordingSession();
+      return session;
+    };
+
+    const controller = new GameController(state, cb, { baseDir, sessionFactory });
+    controller.start('resume');
+
+    return { controller, cb, session, baseDir };
+  }
+
+  it('resume with a DM-terminated tail does NOT send to the session and leaves busy false', () => {
+    const { cb, session, baseDir } = startResume([
+      { role: 'player', text: 'I look around.' },
+      { role: 'dm', text: 'You see a quiet square.' },
+    ]);
+    try {
+      expect(session.sentMessages).toHaveLength(0);
+      expect(cb.onBusyChange).toHaveBeenLastCalledWith(false);
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it('pushes the current character/world state to the UI on load, before any turn (so the panel is not empty on open)', () => {
+    const { cb, baseDir } = startResume([
+      { role: 'player', text: 'I look around.' },
+      { role: 'dm', text: 'You see a quiet square.' },
+    ]);
+    try {
+      // resume takes no DM turn, so nothing mutates the engine -- the state
+      // must still reach the UI so the character panel renders on open.
+      expect(cb.onStateChange).toHaveBeenCalledWith(
+        expect.objectContaining({ character: expect.anything(), world: expect.anything() }),
+      );
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("the player's next action after a DM-terminated resume gets the held brief prepended", () => {
+    const { controller, cb, session, baseDir } = startResume([
+      { role: 'player', text: 'I look around.' },
+      { role: 'dm', text: 'You see a quiet square.' },
+    ]);
+    try {
+      // Sanity: nothing was sent to the (memory-less, fresh) session during start().
+      expect(session.sentMessages).toHaveLength(0);
+
+      controller.submitPlayerAction('I walk toward the well.');
+
+      expect(session.sentMessages).toHaveLength(1);
+      const sent = session.sentMessages[0];
+      expect(sent).toContain('[CAMPAIGN BRIEFING');
+      expect(sent).toContain('[The player now acts:]');
+      expect(sent).toContain('I walk toward the well.');
+      expect(cb.onBusyChange).toHaveBeenLastCalledWith(true);
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it('resume with a PLAYER-terminated tail (quit right before the DM replied) sends the brief immediately so the DM answers it', () => {
+    const { cb, session, baseDir } = startResume([
+      { role: 'dm', text: 'You see a quiet square.' },
+      { role: 'player', text: 'I knock on the door.' },
+    ]);
+    try {
+      expect(session.sentMessages).toHaveLength(1);
+      expect(session.sentMessages[0]).toContain('[CAMPAIGN BRIEFING');
+      expect(cb.onBusyChange).toHaveBeenLastCalledWith(true);
     } finally {
       fs.rmSync(baseDir, { recursive: true, force: true });
     }

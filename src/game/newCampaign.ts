@@ -278,8 +278,14 @@ function buildCharacter(
   race: string,
   statValues: number[],
   background?: BackgroundPreset,
+  explicitStats?: Stats,
 ): Character {
-  const baseStats = assignStats(statValues, preset.statPriority);
+  // `explicitStats` is a per-ability base assignment the player made themselves
+  // (the web wizard lets you map each rolled/array value to a specific ability);
+  // when present it's used verbatim so the character matches exactly what they
+  // confirmed. Without it, fall back to auto-assigning by class priority
+  // (highest value -> the class's top stat) -- the terminal wizard's behavior.
+  const baseStats = explicitStats ?? assignStats(statValues, preset.statPriority);
   const stats = applyRaceBonuses(baseStats, race);
   const maxHp = Math.max(1, preset.hitBase + abilityMod(stats.con));
   const ac = preset.acBase + Math.max(0, Math.min(2, abilityMod(stats.dex)));
@@ -313,6 +319,8 @@ export interface NewCampaignInput {
   /** BackgroundPreset id (see BACKGROUNDS). Omitted or unrecognized -> no background grant. */
   backgroundId?: string;
   statValues: number[];
+  /** Explicit per-ability base scores (pre-race), the player's own assignment of `statValues`. When present, used verbatim instead of auto-assigning by class priority. */
+  stats?: Stats;
   themeSeed: string;
   contentRating?: 'PG-13' | 'R';
 }
@@ -340,7 +348,7 @@ export function createNewCampaign(input: NewCampaignInput, baseDir: string = def
       updatedAt: ts,
       contentRating: input.contentRating ?? 'PG-13',
     },
-    character: buildCharacter(preset, input.heroName, input.race, input.statValues, background),
+    character: buildCharacter(preset, input.heroName, input.race, input.statValues, background, input.stats),
     world: {
       theme: input.themeSeed,
       location: 'Unknown',
@@ -363,6 +371,8 @@ export interface NewHeroInput {
   /** BackgroundPreset id (see BACKGROUNDS). Omitted or unrecognized -> no background grant. */
   backgroundId?: string;
   statValues: number[];
+  /** Explicit per-ability base scores (pre-race), the player's own assignment of `statValues`. When present, used verbatim instead of auto-assigning by class priority. */
+  stats?: Stats;
 }
 
 /**
@@ -381,7 +391,7 @@ export function createNewHero(existing: GameState, input: NewHeroInput): GameSta
 
   return {
     campaign: existing.campaign,
-    character: buildCharacter(preset, input.heroName, input.race, input.statValues, background),
+    character: buildCharacter(preset, input.heroName, input.race, input.statValues, background, input.stats),
     world: existing.world,
     chronicle: existing.chronicle,
   };

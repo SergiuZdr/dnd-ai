@@ -7,6 +7,8 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { TranscriptEntry } from '../game/saves';
 import { loadSettings, resolveModelOption } from '../game/settings';
+import type { OpenAiSettings } from '../game/settings';
+import { fetchWithRetry } from './openaiHttp';
 
 export interface SummarizeInput {
   chunk: TranscriptEntry[];
@@ -99,12 +101,54 @@ export function parseSummarizerReply(text: string, fallbackStorySoFar: string): 
   return { chapterSummary, storySoFar };
 }
 
+/**
+ * One-shot (non-streaming) OpenAI-compatible chat completion -- the
+ * chronicler needs exactly one reply, no tools, no streaming, so this skips
+ * all of openaiDm.ts's agentic-loop machinery and just posts+reads a single
+ * JSON response. Shares the PR-8 fault-tolerance policy (fetchWithRetry: one
+ * retry on 5xx/network) with the DM backend itself.
+ */
+async function callOpenAiChatOnce(openai: OpenAiSettings, model: string, prompt: string): Promise<string> {
+  const url = `${openai.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (openai.apiKeyEnv) {
+    const key = process.env[openai.apiKeyEnv];
+    if (key) headers.Authorization = `Bearer ${key}`;
+  }
+
+  const res = await fetchWithRetry(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], stream: false }),
+  });
+
+  if (!res.ok) {
+    const bodyText = await res.text().catch(() => '');
+    throw new Error(`chronicler endpoint returned HTTP ${res.status}${bodyText ? `: ${bodyText.slice(0, 500)}` : ''}`);
+  }
+
+  const json: unknown = await res.json();
+  const content = (json as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || content.length === 0) {
+    throw new Error('chronicler endpoint returned an empty response');
+  }
+  return content;
+}
+
 export async function summarizeChunk(input: SummarizeInput): Promise<SummarizeOutput> {
   const prompt = buildSummarizerPrompt(input.chunk, input.storySoFar);
   // No onSystemNote-equivalent channel here -- a malformed settings.json is
   // already surfaced once via DmSession.start()'s warning, so this silently
   // falls back rather than repeating the same note on every chronicle update.
-  const model = input.model ?? resolveModelOption(loadSettings().settings.summarizerModel);
+  const { settings } = loadSettings();
+
+  if (settings.dmBackend === 'openai') {
+    const model = input.model ?? settings.openai.model;
+    const text = await callOpenAiChatOnce(settings.openai, model, prompt);
+    return parseSummarizerReply(text, input.storySoFar);
+  }
+
+  const model = input.model ?? resolveModelOption(settings.summarizerModel);
 
   const q = query({
     prompt,

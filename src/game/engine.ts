@@ -257,7 +257,8 @@ export class Engine {
     return { ok: true, message: `Removed ${qty}× ${item.name} from inventory.`, events: [] };
   }
 
-  upsertQuest(title: string, status: QuestStatus, note?: string): EngineResult {
+  /** `reward` is trimmed and only overwrites the quest's existing reward when non-empty -- an omitted or blank reward on an update leaves whatever estimate was already recorded untouched. */
+  upsertQuest(title: string, status: QuestStatus, note?: string, reward?: string): EngineResult {
     const trimmed = title.trim();
     if (trimmed.length < 1) {
       return { ok: false, error: `Quest title must not be empty (got "${title}").` };
@@ -282,6 +283,12 @@ export class Engine {
         if (quest.notes.length > 20) {
           quest.notes.splice(0, quest.notes.length - 20);
         }
+      }
+    }
+    if (reward !== undefined) {
+      const trimmedReward = reward.trim();
+      if (trimmedReward.length > 0) {
+        quest.reward = trimmedReward;
       }
     }
     this.mutate();

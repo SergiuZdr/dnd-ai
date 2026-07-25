@@ -10,8 +10,10 @@ import type {
   Options,
   Query,
   SDKUserMessage,
+  SdkMcpToolDefinition,
 } from '@anthropic-ai/claude-agent-sdk';
 import { loadSettings, resolveModelOption } from '../game/settings';
+import type { GameState } from '../game/state';
 
 export type DmErrorKind = 'auth' | 'rate_limit' | 'unknown';
 
@@ -48,6 +50,40 @@ export interface DmSessionConfig {
   model?: string;
   /** Cap on internal agentic-loop turns spent responding to one player message. Default 12. */
   maxTurnsPerMessage?: number;
+  /**
+   * The campaign's content rating ('PG-13' | 'R'). Unused by this (Claude
+   * Agent SDK) backend and by OpenAiDmSession -- both bake contentRating
+   * into the single `systemPrompt` string above at construction time
+   * (game/controller.ts calls dmSystemPrompt(contentRating)) -- but the dual
+   * referee+narrator backend (src/ai/dualDm.ts) needs contentRating on its
+   * OWN, separately, to build its two distinct system prompts
+   * (refereeSystemPrompt/narratorSystemPrompt) at start() time. Optional so
+   * existing call sites/tests that only ever built a single systemPrompt
+   * keep compiling unchanged; defaults to 'PG-13' if omitted.
+   */
+  contentRating?: 'PG-13' | 'R';
+  /**
+   * Raw tool definitions (handler included), as returned by
+   * createDmTools().tools. Unused by this (Claude Agent SDK) backend --
+   * it drives tools through `server`/`allowedTools` instead -- but carried
+   * on the shared DmSessionConfig so the OpenAI backend (src/ai/openaiDm.ts),
+   * which has no MCP server of its own, can invoke the exact same handlers
+   * directly. Optional so existing call sites/tests that only ever
+   * constructed a Claude session keep compiling unchanged.
+   */
+  tools?: SdkMcpToolDefinition<any>[];
+  /**
+   * Reads the LIVE game state at call time. Unused by this (Claude Agent SDK)
+   * backend and by OpenAiDmSession -- both are single-model loops where the
+   * model that calls the tools is the same one writing the prose, so it sees
+   * every tool result directly. The dual referee+narrator backend
+   * (src/ai/dualDm.ts) needs it: its narrator has no tools and no view of the
+   * engine, so without a ground-truth snapshot it will happily write "your HP
+   * climbs to eleven of thirteen" on a turn where the referee healed nothing.
+   * Optional so existing call sites/tests keep compiling unchanged; when
+   * absent the dual narrator simply omits its ground-truth block.
+   */
+  stateSnapshot?: () => GameState;
 }
 
 const DEFAULT_MAX_TURNS_PER_MESSAGE = 12;
