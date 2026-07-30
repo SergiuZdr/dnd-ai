@@ -10,9 +10,11 @@
 //
 //   In practice that is usually fine, because it is exactly the turns where
 //   the engine did NOT mutate that you want to take back. Run with no flags
-//   first: the dry run reports whether any tool-driven change is recorded in
-//   the range you are cutting, so you know whether the rewind is faithful or
-//   lossy before writing anything.
+//   first: the dry run prints every turn it would drop so you can read them
+//   and decide.
+//
+//   It cannot decide FOR you, and an earlier version of this script wrongly
+//   claimed it could -- see the note above the caution block in main().
 //
 // Chronicle safety: the DM's long-term memory (chronicle.json) summarises
 // everything up to lastSummarizedIndex, and controller.ts replays only
@@ -23,7 +25,12 @@
 // Usage (dry run writes nothing):
 //   npx tsx scripts/admin/rewind.ts --slug "1st and best world" --turns 5
 //   npx tsx scripts/admin/rewind.ts --slug "1st and best world" --turns 5 --apply
-//   npx tsx scripts/admin/rewind.ts --slug X --turns 5 --apply --saves-dir /home/ubuntu/dnd-ai-saves
+//   npx tsx scripts/admin/rewind.ts --slug X --turns 5 --apply --saves-dir /opt/dnd/saves
+//
+// --saves-dir must be the directory the campaign folder sits DIRECTLY inside.
+// Once players are registered, campaigns move under players/<id>/ (see
+// scripts/admin/players.ts), so point it there:
+//   --saves-dir /opt/dnd/saves/players/sergiu
 //
 // Stop the server before running with --apply: a live GameController holds the
 // campaign in memory and will overwrite your edit on its next autosave.
@@ -134,23 +141,39 @@ function main(): void {
     console.log(`${label}: ${e.text.replace(/\s+/g, ' ').slice(0, 110)}`);
   }
 
-  // Honesty check: did anything mechanical happen in the range being cut? The
-  // engine's own roll/ledger messages are logged as `system` entries, so their
-  // presence is the signal that this rewind will leave state inconsistent.
-  const mechanical = dropped.filter((e) => e.role === 'system');
+  // This USED to claim it could tell you whether the rewind was faithful or
+  // lossy, by treating `system` transcript entries as engine roll/ledger
+  // records. They are nothing of the kind: controller.ts only ever appends
+  // 'player' (submitPlayerAction) and 'dm' (handleTurnComplete) entries, and
+  // the sole `system` entry the game writes anywhere is the "A new hero rises"
+  // note on retire. Engine results reach the UI via callbacks and never land in
+  // transcript.jsonl at all. So the old check found nothing every single time
+  // and printed a confident "FAITHFUL: nothing else needs editing" immediately
+  // before an irreversible truncation -- worse than saying nothing.
+  //
+  // A save has no per-turn state history to compare against, so this genuinely
+  // cannot be determined here. Say so plainly instead of inventing a signal.
   console.log('');
-  if (mechanical.length === 0) {
+  console.log(
+    'CAUTION: this truncates the STORY only. character.json / world.json are current-state\n' +
+      'snapshots with no history, and nothing in a save records what your HP, gold, inventory or\n' +
+      'quests were at the point you are cutting back to -- so any damage, loot, gold, XP, level-up\n' +
+      'or quest change from the turns above STAYS as it is now. Read the dropped turns above: if\n' +
+      'they contain rewards or injuries you also want undone, hand-edit those two files yourself.',
+  );
+
+  // A retire note inside the cut range is its own, louder problem: rewinding
+  // across it puts the story back before a hero who no longer exists in
+  // character.json, and no amount of hand-editing short of restoring a backup
+  // will make that coherent.
+  const retireNotes = dropped.filter((e) => e.role === 'system');
+  if (retireNotes.length > 0) {
+    console.log('');
     console.log(
-      'FAITHFUL: no engine changes are recorded in this range, so character.json/world.json\n' +
-        'already match the point you are rewinding to. Nothing else needs editing.',
+      `WARNING: ${retireNotes.length} hero-retirement note(s) are inside this range. Rewinding past a\n` +
+        'retirement rewinds the story to a hero that character.json has already replaced:',
     );
-  } else {
-    console.log(
-      `LOSSY: ${mechanical.length} engine change(s) are recorded in this range. Truncating the transcript\n` +
-        'does NOT undo them -- HP/gold/items/quests will stay as they are now. Review and hand-edit\n' +
-        'character.json / world.json yourself if you want those rolled back too:',
-    );
-    mechanical.forEach((e) => console.log(`   - ${e.text.replace(/\s+/g, ' ').slice(0, 110)}`));
+    retireNotes.forEach((e) => console.log(`   - ${e.text.replace(/\s+/g, ' ').slice(0, 110)}`));
   }
 
   if (!apply) {

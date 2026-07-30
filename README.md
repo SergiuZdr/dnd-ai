@@ -1,6 +1,8 @@
 # AI Dungeon Master
 
-A Dungeons & Dragons campaign, run by Claude, that lives in your browser (phone or desktop) — and never has to end. You play a hero; Claude is the Dungeon Master, narrating the world and deciding what NPCs do. It runs on **your own Claude Code subscription** (no API key, nothing to pay for separately), and the dice, hit points, XP, gold, and inventory are all real code the DM narrates around but can never quietly rewrite. Play a scene, close the tab whenever, and pick up exactly where you left off — the game remembers everything, forever, through a chronicle system that keeps old chapters summarized so the DM's memory never runs out.
+A Dungeons & Dragons campaign, run by an AI dungeon master, that lives in your browser (phone or desktop) — and never has to end. You play a hero; the AI is the Dungeon Master, narrating the world and deciding what NPCs do. The dice, hit points, XP, gold, and inventory are all real code the DM narrates around but can never quietly rewrite. Play a scene, close the tab whenever, and pick up exactly where you left off — the game remembers everything, forever, through a chronicle system that keeps old chapters summarized so the DM's memory never runs out.
+
+**You choose which AI runs the DM.** Out of the box it uses **your own Claude Code subscription** — no API key, nothing to pay for separately. It can instead talk to **any OpenAI-compatible endpoint** (OpenRouter, a local Ollama, your own server), which is what makes it possible to host the game in the cloud and to run mature campaigns without a fade-to-black ceiling. See [Choosing the DM](#choosing-the-dm) for all three options.
 
 **`npm run serve` is the way to play** — the whole game (create a campaign, roll stats, play, retire) lives in a phone/desktop browser now. The original terminal UI (`npm run play`) still works but is legacy/unsupported: new work lands on web first.
 
@@ -33,9 +35,11 @@ The terminal (legacy) UI, for reference — the web UI has its own BG3-inspired 
 ## Requirements
 
 - **Node.js 18 or later**
-- **[Claude Code](https://claude.com/claude-code)** installed and logged in — any subscription works. If you haven't already, run `claude` once in a terminal, log in, then come back.
+- **An AI to run the DM** — either of:
+  - **[Claude Code](https://claude.com/claude-code)** installed and logged in (any subscription). This is the default and needs no API key, no `.env`, no config: the game reuses the login Claude Code already has, and play bills against your own plan's usage like any other Claude Code session. If you haven't already, run `claude` once in a terminal, log in, then come back.
+  - **or** an **OpenAI-compatible endpoint** — a free/cheap cloud model via [OpenRouter](https://openrouter.ai), a local [Ollama](https://ollama.com), or anything else exposing `/v1/chat/completions` with tool-calling. Needs one API key, set as an environment variable (never in a file). See [Choosing the DM](#choosing-the-dm).
 
-No API key, no `.env` file, no config. The game runs through the same login Claude Code already uses, and play bills against your own plan's usage like any other Claude Code session.
+Nothing else. No database, no build step, no accounts to create.
 
 ## Install & play
 
@@ -135,10 +139,10 @@ This is now the whole game, in any browser (phone or desktop) — nothing to ins
    PIN: 482913
    ```
 2. On your phone or another computer (same Wi-Fi), open that address in any browser.
-3. Enter the PIN shown in the terminal — your device remembers it after that.
-4. From the campaigns screen: **Continue** an existing campaign — each one shows the hero you left off as (name, race, class, level), their HP, and where they're standing — or **Begin a new campaign** to run the full wizard (campaign name, hero name, class, race, background, ability scores — standard array or roll 4d6 — world theme, content rating) right there in the browser. In play: streaming narration (the DM's *emphasis* renders as italics rather than raw asterisks), BG3-style d20 dice (tap to roll, tap REROLL to spend a luck point), a "YOU GAINED" toast whenever gold/items/XP land, tap-to-expand character/world stats (quests show their estimated reward), a **Retire hero** action to raise a new hero in the same persistent world, and the same slash commands (`/help`, `/sheet`, `/journal`, `/save`).
+3. Enter the PIN shown in the terminal — your device remembers it after that. (If you've registered players, you enter your own access code here instead, and the PIN no longer applies — see [Playing with other people](#playing-with-other-people).)
+4. From the campaigns screen: **Continue** an existing campaign — each one shows the hero you left off as (name, race, class, level), their HP, and where they're standing — or **Begin a new campaign** to run the full wizard (campaign name, hero name, class, race, background, ability scores — standard array or roll 4d6 — world theme, content rating) right there in the browser. You can also **delete** a campaign you're done with (it's moved to `saves/.deleted/`, not erased) and **Sign out** to forget the stored code on that device. In play: streaming narration (the DM's *emphasis* renders as italics rather than raw asterisks), BG3-style d20 dice (tap to roll, tap REROLL to spend a luck point), a "YOU GAINED" toast whenever gold/items/XP land, tap-to-expand character/world stats (quests show their estimated reward), a **Retire Hero** action (under ☰) to raise a new hero in the same persistent world, and the same slash commands (`/help`, `/sheet`, `/journal`, `/save`).
 
-**Options:** `--port 4000` (default `3123`), `--host 127.0.0.1` (default `0.0.0.0`, all interfaces), `--no-pin` (skip the PIN — only on a network you fully trust), `--debug` (same raw-SDK logging as the legacy terminal's `--debug`).
+**Options:** `--port 4000` (default `3123`), `--host 127.0.0.1` (default `0.0.0.0`, all interfaces), `--no-pin` (skip the PIN — only on a network you fully trust), `--debug` (logs every raw DM-session message to `saves/<slug>/debug.log`). `PORT`, `HOST`, `GAME_PIN` and `SAVES_DIR` environment variables override the flags — that's how the cloud deploy configures itself.
 
 **Playing away from home:** see [Play from your phone anywhere (remote access)](#play-from-your-phone-anywhere-remote-access) below for two ways to reach this server from any network — a private Tailscale VPN (recommended) or a disposable public Cloudflare tunnel (`npm run serve:remote`) — plus how to keep the laptop awake while you play.
 
@@ -180,59 +184,140 @@ caffeinate -s
 
 ### Security note
 
-The PIN is the only thing standing between "has the URL" and "can play your campaign and spend your Claude usage" — there's no username, no separate login. The per-IP rate-limiting (an IP gets locked out for a minute after 5 consecutive wrong PINs, resetting on a correct one) blunts a script trying to brute-force it, but it's not a substitute for keeping access private:
-- **Prefer Tailscale** — it isn't reachable from the public internet at all, so there's no PIN to attack from outside your own devices in the first place.
+With no players registered (see below), the PIN is the only thing standing between "has the URL" and "can play your campaigns and spend your usage" — there's no username, no separate login. The per-IP rate-limiting (an IP gets locked out for a minute after 5 consecutive wrong attempts, resetting on a correct one) blunts a script trying to brute-force it, but it's not a substitute for keeping access private:
+- **Prefer Tailscale** — it isn't reachable from the public internet at all, so there's nothing to attack from outside your own devices in the first place.
 - If you use the Cloudflare option, don't share the printed URL beyond whoever you actually want playing, and treat each run's URL as disposable — it's gone the moment you stop the server.
+- **For anything longer-lived than one session, use access codes instead of the shared PIN** — see the next section.
+
+## Playing with other people
+
+The shared PIN gives everyone who has it the same access to *all* campaigns. If you want friends playing their own games without seeing yours, register them as players — each gets a private access code and their own save directory.
+
+```
+npx tsx scripts/admin/players.ts add "Alex"
+```
+
+That prints an access code **once** (e.g. `7f3a-9c21-be04-1d8e-33ba-90cd`) — hand it to them, and it's what they type on the login screen instead of the PIN. It isn't recoverable afterwards (only a hash is stored), so if it's lost, issue a replacement with `rotate`.
+
+The moment the first player exists, the server switches from shared-PIN mode to access codes and **`GAME_PIN` stops being accepted** — no restart needed. So add yourself too, or you'll lock yourself out:
+
+```
+npx tsx scripts/admin/players.ts add "Sergiu"
+npx tsx scripts/admin/players.ts list                  # ids, campaign counts, last seen
+npx tsx scripts/admin/players.ts rotate alex           # new code, old one dies
+npx tsx scripts/admin/players.ts revoke alex           # code stops working; saves untouched
+```
+
+Already have campaigns from before? They live at the saves root where every player would still see them, so move them into your own directory:
+
+```
+npx tsx scripts/admin/migrate-to-players.ts --owner sergiu           # dry run, moves nothing
+npx tsx scripts/admin/migrate-to-players.ts --owner sergiu --apply   # tars a backup first
+```
+
+Stop the server before running that with `--apply` — a live game keeps autosaving to the old path.
+
+Each code is 96 random bits, stored only as a SHA-256 hash, and a player's campaigns are invisible to every other player (a crafted campaign name can't reach out of their own directory). In the browser, **Sign out** on the campaigns screen forgets the stored code on that device.
+
+## Hosting it in the cloud
+
+Want the game reachable with your laptop **off** — no tunnel, no keeping a machine awake? `docs/DEPLOY.md` is a full runbook for two paths: **Fly.io** (fastest, small recurring cost for an always-on machine) and an **Oracle Cloud Always-Free VM** ($0 forever, more setup). Both run the exact same server, configured entirely by environment variables — no `settings.json` and no API key ever committed.
+
+A cloud deploy has to use `dmBackend: "openai"` or `"dual"`: the Claude backend authenticates through an interactive Claude Code login, and there's no way to complete one inside a headless container.
 
 ## Death
 
 Death is meant to land — the DM is instructed to make it a real, dramatic scene, not a stat-block formality. When your hero falls, the world doesn't end with them: use **Retire hero** (web) or `/retire` (terminal) to build a brand-new hero (name, class, race, background, stats) and step into the same campaign, the same world, the same history, picking up right where the story left off — just with someone new carrying it forward.
 
-## Choosing the DM model
+## Choosing the DM
 
-The game reads `settings.json` at the repo root to decide which Claude model narrates. It's created automatically the first time you launch the game, with sensible defaults:
+The game reads `settings.json` at the repo root to decide who narrates. It's created automatically the first time you launch, with these defaults:
 
 ```json
 {
   "dmModel": "haiku",
-  "summarizerModel": "haiku"
+  "summarizerModel": "haiku",
+  "dmBackend": "claude",
+  "openai": {
+    "baseUrl": "http://127.0.0.1:11434/v1",
+    "model": "llama3.1"
+  }
 }
 ```
 
-Edit it and relaunch to change models. Valid values for both fields: `"default"`, `"haiku"`, `"sonnet"`, `"opus"`.
+Edit it and relaunch. The file is gitignored — a local preference, never something that ships with the repo or a save. If it's missing or malformed the game falls back to these defaults and says so in-game rather than crashing.
 
-- **`dmModel`** — the model that narrates and plays the DM every turn. `haiku` is the fastest and cheapest option and is the default; `sonnet`/`opus` give richer, more nuanced narration at a higher cost-per-turn; `"default"` omits the setting entirely and falls back to whatever model your Claude Code install itself defaults to.
-- **`summarizerModel`** — the model that condenses old chapters into the chronicle rollup (see below). This runs far less often than the DM, so `haiku` is almost always the right choice regardless of what you pick for `dmModel`.
+### `dmBackend` — which AI runs the DM
 
-The file is gitignored — it's a local preference, not something that ships with the repo or a save. If it's ever missing or malformed, the game falls back to the `haiku`/`haiku` defaults automatically and tells you so in-game rather than crashing.
+**`"claude"` (default)** — the Claude Agent SDK, on your own Claude Code login. No API key. `dmModel` and `summarizerModel` pick the model: `"default"`, `"haiku"`, `"sonnet"`, or `"opus"`. `haiku` is fastest and cheapest and is the default; `sonnet`/`opus` narrate more richly at a higher cost per turn; `"default"` falls back to whatever your Claude Code install defaults to. `summarizerModel` only runs on the occasional chronicle rollup, so `haiku` is almost always right there regardless.
 
-A single campaign can still pin its own model by hand-editing `"modelOverride": "opus"` into that campaign's `saves/<slug>/campaign.json` — when set, it takes priority over `settings.json` for that campaign only.
+**`"openai"`** — one model on any OpenAI-compatible endpoint, for **zero Claude usage**:
+
+```json
+{
+  "dmBackend": "openai",
+  "openai": {
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "model": "meta-llama/llama-3.3-70b-instruct",
+    "apiKeyEnv": "OPENROUTER_API_KEY"
+  }
+}
+```
+
+`apiKeyEnv` is the **name of an environment variable**, never the key itself — the key is only ever read from the environment, so it can't end up committed or inside a save. Small models mangle tool-call arguments badly enough to break the mechanics; use a 70B-class instruct model or better, and prove it with `npm run smoke:openai` (look for `TOOL-CALLING SCORE: >=3/4`) before trusting a campaign to it.
+
+**`"dual"`** — two models on the same endpoint, split by job. A **referee** handles all the mechanics (every roll, every change to HP/gold/items/XP/quests), and a separate **narrator** writes the prose you actually read:
+
+```json
+{
+  "dmBackend": "dual",
+  "openai": {
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "model": "meta-llama/llama-3.3-70b-instruct",
+    "narratorModel": "nousresearch/hermes-3-llama-3.1-70b",
+    "apiKeyEnv": "OPENROUTER_API_KEY"
+  }
+}
+```
+
+This exists because the models that follow tool-calling rules reliably tend to be the ones that refuse mature content, and vice versa. The narrator has no tools and cannot touch game state, so pointing it at a more permissive model for an R-rated campaign can't put your dice or your inventory at risk. Prove both halves with `npm run smoke:dual` (`REFEREE TOOL-CALLING SCORE: >=3/4` and `NARRATOR CHECK: PASS`).
+
+On `"openai"` and `"dual"`, the chronicle summarizer uses the same endpoint too — so "zero Claude usage" really is zero, not just for play.
+
+### Per-campaign and environment overrides
+
+A single campaign can pin its own model by hand-editing `"modelOverride": "opus"` into that campaign's `saves/<slug>/campaign.json`; it takes priority over `settings.json` for that campaign only (on `"dual"` it pins the referee).
+
+Every backend setting can also come from an environment variable, which is how the cloud deploy is configured with no `settings.json` on the server at all: `DND_DM_BACKEND`, `DND_OPENAI_BASE_URL`, `DND_OPENAI_MODEL`, `DND_OPENAI_NARRATOR_MODEL`, `DND_OPENAI_API_KEY_ENV`. Precedence is **environment > `settings.json` > built-in default**. See [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## FAQ
 
-**Does this cost anything beyond my subscription?**
-No separate billing — play uses your existing Claude Code plan's usage, the same as any other Claude Code session. A typical turn is a small fraction of a normal conversational exchange, roughly a few cents-equivalent worth of usage.
+**Does this cost anything?**
+Depends on the backend. On `dmBackend: "claude"` (the default) there's no separate billing — play uses your existing Claude Code plan's usage, the same as any other Claude Code session, and a typical turn is a small fraction of a normal conversational exchange. On `"openai"`/`"dual"` you pay whatever your chosen endpoint charges, which can be $0 on a free tier; Claude usage is then untouched.
 
 **It says I'm not logged in.**
-Run `claude` once in a terminal to log in (any subscription), then relaunch `npm run serve` (or `npm run play` for the legacy terminal UI).
+That's the `"claude"` backend telling you there's no Claude Code login. Run `claude` once in a terminal to log in (any subscription), then relaunch `npm run serve` (or `npm run play` for the legacy terminal UI).
 
 **What does "the weave is exhausted" mean?**
-That's the in-fiction version of a rate-limit message — you've hit a temporary usage limit on your plan. Wait a few minutes and try again; your save is untouched.
+That's the in-fiction version of a rate-limit message — you've hit a temporary usage limit, either on your Claude plan or on your OpenAI-compatible endpoint. Wait a few minutes and try again; your save is untouched.
 
 **Where do saves live? Can I back them up?**
-In `saves/<campaign-name>/` at the repo root, as plain JSON files (plus a raw transcript log). Back up a campaign by copying its folder — nothing here is a database or binary format.
+In `saves/<campaign-name>/` at the repo root, as plain JSON files (plus a raw transcript log). Once access codes are in use they move to `saves/players/<player-id>/<campaign-name>/`. Back up a campaign by copying its folder — nothing here is a database or binary format. Deleting a campaign in the UI moves it to `saves/.deleted/` rather than erasing it, so a mis-tap is recoverable by dragging the folder back.
 
 **How do I choose PG-13 vs. R content?**
-It's a step in the New Campaign wizard, right after you pick a world theme. PG-13 is the default; R allows more mature themes and violence (never sexual content, in either rating).
+It's a step in the New Campaign wizard, right after you pick a world theme. PG-13 is the default. R allows more mature themes and violence; how far it actually goes depends on the backend — the Claude path still fades to black before anything explicit, while `"dual"` with a permissive narrator model doesn't.
 
-**Which Claude model runs the game, and can I change it?**
-See [Choosing the DM model](#choosing-the-dm-model) above — it's controlled by `settings.json` (haiku by default), with an optional per-campaign override.
+**Which model runs the game, and can I change it?**
+See [Choosing the DM](#choosing-the-dm) above — `settings.json` picks the backend and the models, with an optional per-campaign override and environment-variable overrides on top.
 
 **Is there a debug mode?**
-`npm run serve -- --debug` (or `npm run play -- --debug` for the legacy terminal UI) logs every raw message from the Agent SDK to `saves/<slug>/debug.log`, useful if something looks off and you want to see exactly what the DM's session sent and received.
+`npm run serve -- --debug` (or `npm run play -- --debug` for the legacy terminal UI) logs every raw message from the DM session to `saves/<slug>/debug.log` — SDK messages on the Claude backend, parsed stream events on the OpenAI-compatible ones. Useful when something looks off and you want to see exactly what was sent and received.
 
 **How do I run the tests?**
-`npm test` runs the full test suite (engine math, saves, the memory system, etc.) — no AI calls, no billing.
+`npm test` runs the full test suite (engine math, saves, the memory system, the backends, the web server) — no AI calls, no billing, no network.
+
+**Can other people play without seeing my campaigns?**
+Yes — see [Playing with other people](#playing-with-other-people).
 
 ## For developers
 
@@ -243,17 +328,20 @@ src/
             players.ts (access-code registry + per-player save namespacing)
   ai/       DM session backends (Agent SDK, OpenAI-compatible, dual referee+narrator),
             system prompts + context-brief builder, MCP tool layer, chronicle summarizer
-  ui/       ink components: App shell, bounded story log + pure line-wrapping, sidebar,
-            input bar, interactive roll prompt, wizard
+  ui/       ink components (legacy TUI): App shell, bounded story log + pure
+            line-wrapping, sidebar, input bar, dice card, wizard
   web/      phone/web mode: bridge.ts (pure ControllerCallbacks -> SSE-event mirror),
             server.ts (auth-gated HTTP/SSE routes over plain `http`, no framework),
             serve.ts (CLI entry), index.html (single-file mobile UI, no build step)
 
-test/       one file per src module, flat, mirroring the source name. `npm test`
-            runs all of it and makes no AI calls.
+test/       mirrors src/ one-for-one -- test/game, test/ai, test/ui, test/web,
+            plus test/scripts for the admin scripts. One file per module, named
+            after it. `npm test` runs all of it and makes no AI calls.
 
-docs/       PLAN.md (design writeup), DEPLOY.md (cloud/Oracle/Fly runbook),
-            the SRD/PRD for the pluggable-backend + cloud work, review-log.md
+docs/       DEPLOY.md (cloud runbook: Fly + Oracle Always-Free)
+  design/   PLAN.md -- architecture and the reasoning behind it
+  requirements/  the SRD/PRD that drove the pluggable-backend + cloud work,
+            kept as the historical "why", plus review-log.md
 
 scripts/
   smoke/    live end-to-end proofs against a REAL model endpoint. These BILL --
@@ -270,12 +358,16 @@ scripts/
 `smoke/` costs money when you run it and everything under `admin/` mutates
 saves, so the directory name is the warning.
 
-The engine owns every mechanical rule; the AI layer only narrates and calls tools the engine validates. The web server is a second front end on top of the exact same `GameController` the TUI uses — see `src/web/bridge.ts`'s header comment. See `docs/PLAN.md` for the full design writeup.
+The engine owns every mechanical rule; the AI layer only narrates and calls tools the engine validates. The web server is a second front end on top of the exact same `GameController` the TUI uses — see `src/web/bridge.ts`'s header comment. See `docs/design/PLAN.md` for the full design writeup.
 
 - `npm test` — the full vitest suite, no AI calls.
 - `npm run typecheck` — `tsc --noEmit`.
 - `npm run serve:remote` (`scripts/tunnel.ts`) — same server as `npm run serve`, plus an optional Cloudflare quick tunnel for remote access; see [Play from your phone anywhere (remote access)](#play-from-your-phone-anywhere-remote-access).
-- Three smoke scripts prove the real Agent SDK integration end-to-end. The first is free; **the other two bill real turns** against whatever account is logged in:
-  - `npm run spike` — ~30-line proof that subscription auth + streaming + an in-process MCP tool all work. Cheap (one short turn).
-  - `npm run smoke` — headless proof that a full DM turn narrates, calls tools, mutates state, and autosaves. Bills a few real turns.
-  - `npm run smoke:memory` — headless proof of the chronicle + session-rotation system end to end. Bills several real turns, including at least one haiku summarizer call.
+- Five live scripts prove the real integrations end-to-end. **All of them bill** — against your Claude plan or your OpenAI-compatible provider — and none is part of `npm test`:
+  - `npm run spike` — ~30-line proof that subscription auth + streaming + an in-process MCP tool all work on the Agent SDK. Cheapest of the five (one short turn).
+  - `npm run smoke` — the Claude backend: a full DM turn narrates, calls tools, mutates state, and autosaves. A few real turns.
+  - `npm run smoke:memory` — the chronicle + session-rotation system end to end, driven through `GameController`'s public API. Several turns, including at least one summarizer call.
+  - `npm run smoke:openai` — the same mechanics bar against your OpenAI-compatible endpoint (`dmBackend:"openai"`). Look for `TOOL-CALLING SCORE: >=3/4`.
+  - `npm run smoke:dual` — the referee+narrator split (`dmBackend:"dual"`): scores the referee's tool-calling *and* checks the narrator produces prose. Look for `REFEREE TOOL-CALLING SCORE: >=3/4` and `NARRATOR CHECK: PASS`.
+
+  Run the relevant one after **any** change to `src/ai/prompts.ts`. Nothing in `npm test` can tell you whether narration got worse.

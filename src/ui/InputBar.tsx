@@ -1,9 +1,9 @@
 // Bottom input bar: free-text action entry while idle, a narrating notice
 // while the DM is streaming/thinking. Esc during that busy window interrupts
 // the in-flight turn -- EXCEPT while a player dice roll is pending
-// (rollPending), where this whole hook goes inactive: RollPrompt owns
-// keyboard input for that window instead, and Esc must be a total no-op so
-// it can never interrupt the DM turn mid-roll. Slash commands (including
+// (rollPending), where this whole hook goes inactive: DiceLine owns keyboard
+// input for that window instead, and Esc must be a total no-op so it can never
+// interrupt the DM turn mid-roll. Slash commands (including
 // /quit) are not special-cased here -- everything typed is forwarded to
 // onSubmit verbatim; App.tsx decides whether it's a slash command or a plain
 // action.
@@ -14,7 +14,7 @@ import { useRawModeActive } from './useRawModeActive';
 
 export interface InputBarProps {
   busy: boolean;
-  /** True while a player roll is awaiting SPACE/Enter/L -- disables this bar's own key handling entirely (RollPrompt owns input instead). */
+  /** True while a player roll is awaiting SPACE/Enter/L -- disables this bar's own key handling entirely (DiceLine owns input instead; it absorbed the old separate RollPrompt component). */
   rollPending: boolean;
   onSubmit: (text: string) => void;
   onInterrupt: () => void;

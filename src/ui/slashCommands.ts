@@ -45,10 +45,14 @@ export function formatHelp(): string {
 }
 
 /**
- * Web version of /help: /retire and /quit aren't offered on web v1 (see
- * src/web/server.ts), so they're left out of the listing here rather than
- * advertising commands that just bounce back a "TUI-only" note; the tap
- * equivalents replace the TUI's keyboard-shortcut list.
+ * Web version of /help: neither /retire nor /quit is a typed command on web,
+ * so they're left out of the listing rather than advertised as text you can
+ * enter. Both still EXIST there, just as UI instead -- retiring is the Retire
+ * Hero button in the ☰ command menu (POST /api/retire), and quitting is
+ * closing the tab, since progress is already saved after every turn. See
+ * src/web/server.ts's handleSlashCommand, which says exactly that if someone
+ * types them anyway. The tap equivalents below replace the TUI's
+ * keyboard-shortcut list.
  */
 export function formatHelpWeb(): string {
   const webCommands = SLASH_COMMANDS.filter((c) => c.cmd !== '/retire' && c.cmd !== '/quit');

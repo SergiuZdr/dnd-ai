@@ -240,7 +240,24 @@ export class DmSession {
           }
 
           case 'rate_limit_event': {
-            this.callbacks.onSystemNote?.(`Rate limit status: ${message.rate_limit_info.status}`);
+            // These arrive on ordinary healthy turns -- the very first turn of a
+            // fresh campaign reported "allowed_warning" -- and onSystemNote is a
+            // PLAYER-facing channel that the web client renders inline in the
+            // story feed. So the first thing a new player read, above the
+            // opening scene, was "Rate limit status: allowed_warning". Statuses
+            // that don't cost the player anything belong in the operator's log
+            // only; a genuine rejection gets plain language instead of the
+            // SDK's enum.
+            const status = message.rate_limit_info.status;
+            if (status === 'allowed') break;
+            if (status === 'allowed_warning') {
+              console.warn('[rate-limit] approaching the usage limit (status=allowed_warning)');
+              break;
+            }
+            console.warn(`[rate-limit] status=${status}`);
+            this.callbacks.onSystemNote?.(
+              'The DM is being rate-limited by the model provider — this turn may be slow or need retrying.',
+            );
             break;
           }
 

@@ -1,8 +1,13 @@
 // The chronicler: a one-shot, cheap-model call that condenses a chunk of raw
 // transcript into a short chapter summary and folds it into the running
-// "story so far" rollup. This runs as its own `query()` -- separate from the
-// DM session, no MCP tools, no streaming input, exactly one turn -- so it can
-// use a cheaper model without touching the DM's own conversation.
+// "story so far" rollup. Always exactly one turn, no tools, no streaming
+// input, and always separate from the DM's own conversation -- so it can use a
+// cheaper model without touching it.
+//
+// Which endpoint it calls follows settings.dmBackend (see summarizeChunk):
+// 'openai' AND 'dual' both go to the OpenAI-compatible endpoint, 'claude' to
+// the Agent SDK. The 'dual' case matters more than it looks -- see the comment
+// at that branch.
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { TranscriptEntry } from '../game/saves';
@@ -142,7 +147,21 @@ export async function summarizeChunk(input: SummarizeInput): Promise<SummarizeOu
   // falls back rather than repeating the same note on every chronicle update.
   const { settings } = loadSettings();
 
-  if (settings.dmBackend === 'openai') {
+  // 'dual' belongs on this branch every bit as much as 'openai' does. The
+  // referee/narrator split is a property of the DM *turn* only; the chronicler
+  // is one plain completion either way. Letting 'dual' fall through to the
+  // Claude path below was a real bug with two faces: locally it quietly spent
+  // Claude tokens on a backend chosen specifically to spend none (the SRD's
+  // headline metric is "Claude tokens consumed during play: 0"), and on a
+  // headless host -- where there is no Claude Code login to fall back to -- it
+  // threw on every attempt, so lastSummarizedIndex never advanced, the retry
+  // fired again after each turn, and resume replayed the entire transcript
+  // instead of the recent tail.
+  //
+  // openai.model (the REFEREE's model under 'dual') is the right one to use
+  // here, not narratorModel: this is faithful structured summarization, which
+  // is what the reliable tool-caller was picked for.
+  if (settings.dmBackend === 'openai' || settings.dmBackend === 'dual') {
     const model = input.model ?? settings.openai.model;
     const text = await callOpenAiChatOnce(settings.openai, model, prompt);
     return parseSummarizerReply(text, input.storySoFar);

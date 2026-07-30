@@ -24,6 +24,7 @@ import {
   createNewCampaign,
   createNewHero,
   roll4d6DropLowest,
+  canonicalRaceName,
 } from '../game/newCampaign';
 import {
   formatHelpWeb,
@@ -347,8 +348,13 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
         bridge.appendSystemEntry('Saved.');
         return;
       case '/retire':
+        // Retiring works on web -- POST /api/retire, driven by the Retire Hero
+        // button in the ☰ command menu, which runs the full hero wizard. Only
+        // the typed COMMAND isn't wired (the wizard is a client-side flow, not
+        // something a one-shot action POST can open), so point at the button
+        // rather than sending the player off to the legacy terminal UI.
         bridge.appendSystemEntry(
-          '/retire is TUI-only for now — run `npm run play` in a terminal to retire your hero and raise a new one.',
+          'Tap ☰ and choose Retire Hero to raise a new hero in this same world — it runs the full hero wizard right here.',
         );
         return;
       case '/quit':
@@ -411,9 +417,19 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
         keyStat: preset.statPriority[0].toUpperCase(),
         kit: preset.starterItems.map((item) => (item.qty > 1 ? `${item.name} ×${item.qty}` : item.name)),
       })),
-      races: RACES.map((r) => ({ id: r.id, name: r.name, description: r.description })),
+      // `bonuses` ships too so the wizard can show the player their REAL
+      // post-race scores before they commit. Without it the client could only
+      // echo the base pool back under a "Final" heading, which is exactly the
+      // lie it used to tell (base 15 DEX shown as final for an Elf who
+      // actually starts at 17).
+      races: RACES.map((r) => ({ id: r.id, name: r.name, description: r.description, bonuses: r.bonuses })),
       backgrounds: BACKGROUNDS.map((b) => ({ id: b.id, name: b.name, description: b.description })),
-      themes: THEMES.map((t) => ({ id: t.id, label: t.label, seed: t.seed })),
+      // The 'custom' entry is the TERMINAL wizard's menu row for "let me type
+      // my own", and it carries an empty seed. The web wizard renders its own
+      // custom card with a text input, so serving this one too produced two
+      // identical "Custom..." cards -- and picking the preset one created a
+      // campaign with a blank theme and no way to type anything.
+      themes: THEMES.filter((t) => t.id !== 'custom').map((t) => ({ id: t.id, label: t.label, seed: t.seed })),
       standardArray: STANDARD_ARRAY,
     });
   }
@@ -518,7 +534,9 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
       newState.campaign.slug,
       {
         role: 'system',
-        text: `A new hero rises: ${heroName} the ${race} ${classPreset?.name ?? classId}.`,
+        // canonicalRaceName, not the raw wire value: the client posts a race
+        // id, and this line is read by the player and by the DM.
+        text: `A new hero rises: ${heroName} the ${canonicalRaceName(race)} ${classPreset?.name ?? classId}.`,
         ts: new Date().toISOString(),
       },
       session.saveDir,
@@ -705,8 +723,20 @@ export function createGameServer(opts: GameServerOptions = {}): GameServerHandle
         // field cannot accept a 29-character access code, so the client sizes
         // and labels its one input from this. It reveals only whether any
         // player is registered -- no names, no ids, no hashes.
+        //
+        // 'none' is the --no-pin case, and it exists because without it the
+        // client had no way to learn there was nothing to ask for: it fell back
+        // to the PIN screen and demanded "the 6-digit PIN shown in your
+        // server's terminal" when no such PIN had been printed or existed. The
+        // one mode meant for frictionless play was the one you couldn't get
+        // past. Safe to publish: it says only that this server is open, which
+        // anyone can discover by calling any other endpoint.
         if (pathname === '/api/auth-mode' && method === 'GET') {
-          respondJson(res, 200, { mode: hasPlayers(savesRoot) ? 'code' : 'pin' });
+          // Order matters and mirrors the enforcement below: a registered
+          // player registry outranks the PIN entirely (--no-pin does NOT open
+          // per-player saves), so 'code' is checked before 'none'.
+          const mode = hasPlayers(savesRoot) ? 'code' : pin === undefined ? 'none' : 'pin';
+          respondJson(res, 200, { mode });
           return;
         }
 

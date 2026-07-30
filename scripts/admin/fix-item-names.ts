@@ -13,8 +13,14 @@
 // Usage (dry run prints a diff and writes nothing):
 //   npx tsx scripts/admin/fix-item-names.ts
 //   npx tsx scripts/admin/fix-item-names.ts --apply
-//   npx tsx scripts/admin/fix-item-names.ts --apply --saves-dir /home/ubuntu/dnd-ai-saves
+//   npx tsx scripts/admin/fix-item-names.ts --apply --saves-dir /opt/dnd/saves
 //   npx tsx scripts/admin/fix-item-names.ts --apply --slug "1st and best world"
+//
+// --saves-dir must be the directory campaign folders sit DIRECTLY inside: this
+// scans <savesDir>/<slug>/character.json one level down. Once players are
+// registered, campaigns move under players/<id>/ (see scripts/admin/players.ts),
+// so point it there and run it once per player:
+//   --saves-dir /opt/dnd/saves/players/sergiu
 //
 // --apply writes a timestamped .bak of every file it touches first, and the
 // script is idempotent: re-running it after a successful pass is a no-op.

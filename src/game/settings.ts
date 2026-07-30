@@ -40,6 +40,11 @@
 // applyEnvOverrides() is a byte-for-byte no-op, so local dev with no env
 // vars behaves exactly as before P2 (see the test suite's "no env set"
 // cases).
+//
+// The chronicle summarizer (src/ai/summarizer.ts) follows dmBackend too: both
+// 'openai' and 'dual' send it to the OpenAI-compatible endpoint, so a
+// zero-Claude-token deploy stays zero-Claude-token for chronicle rollups as
+// well as for play.
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -51,7 +56,7 @@ export type DmBackend = 'claude' | 'openai' | 'dual';
 export interface OpenAiSettings {
   /** e.g. "http://127.0.0.1:11434/v1" (local Ollama) or an OpenRouter/self-host base URL. No trailing slash required. */
   baseUrl: string;
-  /** Model tag as the endpoint expects it, e.g. "llama3.1" or "meta-llama/llama-3.1-70b-instruct". */
+  /** Model tag exactly as the endpoint expects it, e.g. "llama3.1" (Ollama) or "meta-llama/llama-3.3-70b-instruct" (OpenRouter). Under dmBackend:'dual' this is the REFEREE's model, and it's also what the chronicle summarizer uses. */
   model: string;
   /** Name of an environment variable to read the API key from at session start -- e.g. "OPENROUTER_API_KEY". The key itself is never stored here. Omit for endpoints that need no key (e.g. local Ollama). */
   apiKeyEnv?: string;
@@ -72,7 +77,7 @@ export interface Settings {
   summarizerModel: ModelSetting;
   /** Which DmSession implementation the controller's default sessionFactory builds. Default 'claude' -- nothing changes until the owner opts in. */
   dmBackend: DmBackend;
-  /** Only consulted when dmBackend is 'openai'. Defaults to a zero-config local Ollama endpoint. */
+  /** Consulted when dmBackend is 'openai' OR 'dual' (both talk to the same endpoint; 'dual' additionally reads narratorModel), and by the chronicle summarizer on those same two backends. Defaults to a zero-config local Ollama endpoint. */
   openai: OpenAiSettings;
 }
 
@@ -133,12 +138,13 @@ function nonEmptyEnv(value: string | undefined): string | undefined {
  * is what lets a cloud deploy configure the DM entirely via env/secrets with
  * no settings.json needed on the server at all.
  *
- * With none of the four vars set, this returns `loaded` completely
- * unchanged -- local dev (`npm run serve` with no env vars) is byte-for-byte
- * unaffected. `warning` (about the FILE) is passed through untouched; an
- * invalid DND_DM_BACKEND value is simply ignored (falls back to whatever the
- * file/default already resolved), never thrown -- same never-crash spirit as
- * the rest of this module.
+ * With none of the five vars set (DND_DM_BACKEND, DND_OPENAI_BASE_URL,
+ * DND_OPENAI_MODEL, DND_OPENAI_API_KEY_ENV, DND_OPENAI_NARRATOR_MODEL), this
+ * returns `loaded` completely unchanged -- local dev (`npm run serve` with no
+ * env vars) is byte-for-byte unaffected. `warning` (about the FILE) is passed
+ * through untouched; an invalid DND_DM_BACKEND value is simply ignored (falls
+ * back to whatever the file/default already resolved), never thrown -- same
+ * never-crash spirit as the rest of this module.
  */
 function applyEnvOverrides(loaded: LoadedSettings, env: NodeJS.ProcessEnv): LoadedSettings {
   const rawBackend = env.DND_DM_BACKEND;

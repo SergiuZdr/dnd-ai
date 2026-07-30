@@ -231,10 +231,10 @@ async function main(): Promise<void> {
     detail: `count=${mutatingToolCalls}`,
   });
 
-  const anyToolCalledAllThreeTurns = completedTurns.length === 3;
+  const allThreeTurnsCompleted = completedTurns.length === 3;
   checks.push({
     name: 'all_three_turns_completed',
-    pass: anyToolCalledAllThreeTurns,
+    pass: allThreeTurnsCompleted,
     detail: `turns=${completedTurns.length}`,
   });
 

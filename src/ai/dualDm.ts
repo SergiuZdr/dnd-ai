@@ -136,12 +136,6 @@ function stripMechanicsReminder(text: string): string {
 }
 
 /**
- * Builds the narrator's one user message for this turn: scene context/the
- * player's cue (the incoming send() text, cleaned of referee-only noise,
- * plus a story-so-far hint when present) + the referee's beat sheet + the
- * formatted tool-outcome record. Exported for direct unit testing.
- */
-/**
  * The hero's real numbers, straight off the engine, as the narrator's last
  * line of defence against inventing mechanics.
  *
@@ -167,6 +161,13 @@ export function formatHeroGroundTruth(state: GameState): string {
   ].join('\n');
 }
 
+/**
+ * Builds the narrator's one user message for this turn: scene context/the
+ * player's cue (the incoming send() text, cleaned of referee-only noise, plus a
+ * story-so-far hint when present) + the referee's beat sheet + the formatted
+ * tool-outcome record + the ground-truth hero sheet above. Exported for direct
+ * unit testing.
+ */
 export function buildNarratorUserPrompt(
   playerText: string,
   beatSheet: string,
@@ -200,7 +201,7 @@ ${beatSheet || '(the referee reported nothing unusual this turn)'}
 [TOOL OUTCOMES THIS TURN]
 ${formatToolOutcomes(outcomes)}
 ${groundTruth}${nothingHappened}
-Write the narration now, in your voice, ending with "What do you do?" unless the scene has just ended in death.`;
+Write the narration now, in your voice, ending with "What do you do?" unless the scene has just ended in death. Then, on one final line after the prose, add the machine-read suggestions trailer: [[SUGGEST: three | short | scene-specific actions]] (2-5 words each, phrased as the player would type them). It is stripped before display and shown as buttons, so it must come last and must never appear inside your prose.`;
 }
 
 export interface DualModelDmSessionOptions {

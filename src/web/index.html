@@ -183,6 +183,49 @@
 
   /* ---- centered form screens (PIN + campaign list) ---- */
   .centered { align-items: center; justify-content: center; padding: 24px; text-align: center; gap: 16px; }
+
+  /* ---- title screen ----
+     Deliberately NOT a .hero-card: a bordered box would make the front door
+     look like the login form it replaced. This is meant to read as a title
+     card -- type on darkness, one lit die above it, a single call to action --
+     so the frame ornaments already drawn around #app do the containing. */
+  .title-stage {
+    display: flex; flex-direction: column; align-items: center; gap: 18px;
+    max-width: 30rem; padding: 8px;
+  }
+  .title-die { width: 108px; height: 108px; }
+  .title-eyebrow {
+    font-family: var(--font-display); font-size: 0.74rem; letter-spacing: 0.34em;
+    text-transform: uppercase; color: var(--brass); opacity: 0.9;
+  }
+  .title-wordmark {
+    font-family: var(--font-display); font-weight: 700; margin: 0;
+    /* Fluid so the wordmark stays the dominant element on a phone and a 27" alike. */
+    font-size: clamp(2.6rem, 8vw, 4.4rem); line-height: 0.96; letter-spacing: 0.01em;
+    background: linear-gradient(175deg, #fbe6b4 8%, var(--brass-bright) 42%, #a9772f 96%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: var(--brass-bright);
+    /* The gradient replaces the glyph fill, so the usual text-shadow would be
+       clipped away with it -- a drop-shadow filter lifts the letters instead. */
+    filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.75)) drop-shadow(0 0 26px rgba(173, 127, 58, 0.32));
+  }
+  .title-pitch {
+    margin: 0; color: var(--parchment-dim); font-size: 1.06rem; line-height: 1.6;
+    font-style: italic; max-width: 27rem; text-wrap: balance;
+  }
+  .title-cta {
+    margin-top: 6px;
+    background: linear-gradient(180deg, var(--brass-bright), var(--brass)); color: var(--ink);
+    border: none; border-radius: 13px; padding: 17px 40px;
+    font-family: var(--font-display); font-size: 1.02rem; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    box-shadow: 0 3px 0 rgba(0,0,0,.4), 0 10px 26px rgba(173,127,58,.34), inset 0 1px 0 rgba(255,255,255,.38);
+  }
+  .title-cta:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(0,0,0,.4), 0 5px 14px rgba(173,127,58,.26); }
+  .title-notes {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 20px; margin-top: 4px;
+    color: var(--parchment-dim); font-size: 0.8rem; letter-spacing: 0.04em; opacity: 0.75;
+  }
   .hero-card {
     position: relative; width: 100%; max-width: 380px; padding: 34px 26px 30px;
     background: linear-gradient(160deg, var(--stone-hi), var(--stone) 65%);
@@ -524,6 +567,67 @@
 
   .dice-line { padding: 2px 20px 6px; min-height: 1.2em; font-size: 0.82rem; color: var(--brass); font-family: var(--font-mono); text-align: center; max-width: 680px; width: 100%; margin: 0 auto; }
 
+  /* ---- suggested actions ----
+     Shares the feed's 680px measure so the chips line up under the prose they
+     belong to. Scrolls sideways rather than wrapping to a third row on a phone,
+     which would otherwise eat the story area. */
+  .suggest-row {
+    flex: none; display: flex; gap: 8px; align-items: stretch;
+    padding: 4px 20px 10px; max-width: 680px; width: 100%; margin: 0 auto;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .suggest-row::-webkit-scrollbar { display: none; }
+  /* Wraps to a second line rather than ellipsizing. A chip cut to
+     "Investigate the ta…" tells the player nothing, and the DM legitimately
+     produces labels a few words longer than the prompt's 2-5 word target --
+     two short lines is the honest way to show them. The pill radius drops to a
+     rounded rectangle because a two-line pill looks like a lozenge. */
+  .suggest-chip {
+    flex: 0 1 auto; max-width: 24ch;
+    background: linear-gradient(170deg, rgba(58,42,22,.92), rgba(40,29,15,.92));
+    border: 1px solid var(--border-bright); border-radius: 14px;
+    padding: 9px 14px; color: var(--parchment); font-size: 0.85rem;
+    font-family: var(--font-body); text-align: left; line-height: 1.3;
+    /* Belt and braces for a label that overshoots even two lines. */
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    transition: border-color .15s, transform .15s, color .15s;
+  }
+  @media (hover: hover) {
+    .suggest-chip:hover { border-color: var(--brass); color: var(--brass-bright); transform: translateY(-1px); }
+  }
+  .suggest-chip:active { transform: translateY(1px); }
+  .suggest-chip::before { content: '▸ '; color: var(--brass); }
+  /* Lets the player turn the chips off for good without hunting in a menu. */
+  .suggest-hide {
+    flex: 0 0 auto; background: none; border: none; color: var(--parchment-dim);
+    font-size: 1rem; line-height: 1; padding: 8px; opacity: .55; margin-left: auto;
+  }
+  .suggest-hide:hover { opacity: 1; }
+
+  /* ---- "the DM is thinking" ----
+     A turn can take many seconds. Before this, the only signal was the Act
+     button swapping to Stop -- so the screen simply sat there after you acted,
+     with no indication anything was happening. */
+  .thinking-row {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 2px 20px 8px; max-width: 680px; width: 100%; margin: 0 auto;
+    color: var(--brass); font-size: 0.84rem; font-style: italic;
+  }
+  .thinking-dots { display: inline-flex; gap: 4px; }
+  .thinking-dots i {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--brass);
+    animation: think-pulse 1.1s ease-in-out infinite;
+  }
+  .thinking-dots i:nth-child(2) { animation-delay: .16s; }
+  .thinking-dots i:nth-child(3) { animation-delay: .32s; }
+  @keyframes think-pulse {
+    0%, 100% { opacity: .25; transform: translateY(0); }
+    50% { opacity: 1; transform: translateY(-3px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .thinking-dots i { animation: none; opacity: .7; }
+  }
+
   .command-bar { flex: none; border-top: 1px solid var(--border); background: linear-gradient(180deg, var(--stone), var(--stone-hi)); }
   .slash-menu { display: flex; gap: 8px; padding: 10px 12px 0; flex-wrap: wrap; }
   .slash-menu button { background: var(--stone-hi); border: 1px solid var(--border-bright); border-radius: 10px; padding: 8px 13px; font-size: 0.8rem; font-family: var(--font-display); letter-spacing: .02em; color: var(--parchment-dim); min-height: 44px; }
@@ -838,9 +942,38 @@
   .pick-meta { color: var(--parchment-dim); font-size: 0.78rem; margin-top: 6px; font-family: var(--font-mono); }
   .pick-kit { color: var(--parchment-dim); font-size: 0.78rem; margin-top: 4px; font-style: italic; }
   .rating-card { text-align: center; }
+
+  /* ---- composite-step furniture ---- */
+  /* Two labelled fields share the identity step, so each needs its own label:
+     a bare input under one heading was fine when a step asked exactly one
+     question and ambiguous the moment it asks two. */
+  .wizard-field { display: flex; flex-direction: column; gap: 6px; }
+  .wizard-field-label {
+    font-family: var(--font-display); font-size: 0.72rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--brass);
+  }
+  .wizard-hint { color: var(--parchment-dim); font-size: 0.85rem; font-style: italic; margin-top: -6px; }
+  /* Separates the review tally from the questions above it on the same step. */
+  .wizard-divider {
+    height: 1px; margin: 6px 0 2px;
+    background: linear-gradient(90deg, transparent, var(--border-bright) 20%, var(--border-bright) 80%, transparent);
+  }
+
   @media (min-width: 860px) {
-    .wizard-body { max-width: 720px; }
+    /* Wider than before: the steps now carry two or three sections each, and a
+       640px column in a 1280px frame was most of the reason the wizard read as
+       mostly-empty screen. */
+    .wizard-body { max-width: 940px; padding: 24px 28px; }
     .wizard-card-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .wizard-rating-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    /* Name fields sit side by side rather than stacked in a tall column. */
+    .wizard-step > .wizard-field { display: grid; grid-template-columns: 160px 1fr; align-items: center; gap: 14px; }
+    .wizard-step > .wizard-field .wizard-field-label { text-align: right; }
+  }
+  @media (min-width: 1200px) {
+    .wizard-body { max-width: 1080px; }
+    /* Six classes / six races / seven backgrounds all land on two tidy rows. */
+    .wizard-card-list { grid-template-columns: repeat(3, 1fr); }
   }
 
   .wizard-tabs { display: flex; gap: 8px; }
@@ -854,6 +987,13 @@
     font-family: var(--font-mono); font-size: 0.85rem;
   }
   .pool-chip.final { background: rgba(238, 200, 119, 0.12); border-color: var(--brass); color: var(--brass-bright); }
+  /* The final chips carry three parts now (STAT, total, and the racial +N) so
+     the player can see where a boosted score came from. */
+  .pool-chip.final { display: inline-flex; align-items: baseline; gap: 5px; }
+  .pool-chip.final .chip-stat { font-size: 0.72rem; letter-spacing: 0.06em; opacity: 0.8; }
+  .pool-chip.final .chip-total { font-weight: 700; }
+  .pool-chip.final.boosted { border-color: var(--brass-bright); background: rgba(238, 200, 119, 0.2); }
+  .pool-chip.final .chip-bonus { font-size: 0.7rem; color: var(--gain, #8fbf6f); font-weight: 700; }
   .wizard-ghost-btn { background: transparent; border: 1px solid var(--border-bright); color: var(--brass); border-radius: 10px; padding: 9px 15px; align-self: flex-start; font-size: 0.88rem; font-family: var(--font-display); }
   .wizard-assign { display: flex; flex-direction: column; gap: 8px; }
   .assign-row {
@@ -930,6 +1070,26 @@
   <i class="corner-mark frame-corner tr"></i>
   <i class="corner-mark frame-corner bl"></i>
   <i class="corner-mark frame-corner br"></i>
+
+  <!-- The front door. Before this existed, arriving at the game showed either a
+       login box or a bare list of save slots -- nothing that said what this is
+       or made anyone want to play it. Shown only when there is nothing to
+       resume (see boot); a returning player with campaigns goes straight to
+       their shelf. -->
+  <div id="screen-title" class="screen centered hidden">
+    <div class="title-stage">
+      <div class="title-die" id="brand-die-title"></div>
+      <div class="title-eyebrow">A solo tabletop campaign</div>
+      <h1 class="title-wordmark">AI Dungeon<br />Master</h1>
+      <p class="title-pitch">A dungeon master who never sleeps. Your choices, real dice, and one world that remembers everything you do in it.</p>
+      <button class="title-cta" id="title-begin-btn" type="button">Enter the world</button>
+      <div class="title-notes">
+        <span>⚔ Six classes</span>
+        <span>✦ Honest dice</span>
+        <span>∞ Endless campaign</span>
+      </div>
+    </div>
+  </div>
 
   <div id="screen-pin" class="screen centered hidden">
     <div class="hero-card">
@@ -1042,6 +1202,16 @@
       <div class="feed" id="feed"></div>
       <div class="dice-line" id="dice-line"></div>
 
+      <div class="thinking-row hidden" id="thinking-row" aria-live="polite">
+        <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span id="thinking-text">The dungeon master is thinking…</span>
+      </div>
+
+      <!-- Suggested actions. Sits above the input rather than inside the feed so
+           it reads as part of the controls (a thing you can press) instead of
+           part of the story (a thing the DM said). -->
+      <div class="suggest-row hidden" id="suggest-row" aria-label="Suggested actions"></div>
+
       <div class="command-bar">
         <div class="slash-menu hidden" id="slash-menu">
           <button data-cmd="/help">Help</button>
@@ -1083,6 +1253,8 @@
 
   var els = {
     app: document.getElementById('app'),
+    titleScreen: document.getElementById('screen-title'),
+    titleBeginBtn: document.getElementById('title-begin-btn'),
     pinScreen: document.getElementById('screen-pin'),
     campaignsScreen: document.getElementById('screen-campaigns'),
     wizardScreen: document.getElementById('screen-wizard'),
@@ -1110,6 +1282,8 @@
     hudBody: document.getElementById('hud-body'),
     drawer: document.getElementById('drawer'),
     reconnectPill: document.getElementById('reconnect-pill'),
+    suggestRow: document.getElementById('suggest-row'),
+    thinkingRow: document.getElementById('thinking-row'),
     feed: document.getElementById('feed'),
     diceLine: document.getElementById('dice-line'),
     slashBtn: document.getElementById('slash-btn'),
@@ -1178,6 +1352,7 @@
     // .frame-corner rules, which hide the corner ornaments on screens whose
     // chrome reaches the frame edge.
     els.app.dataset.screen = name;
+    els.titleScreen.classList.toggle('hidden', name !== 'title');
     els.pinScreen.classList.toggle('hidden', name !== 'pin');
     els.campaignsScreen.classList.toggle('hidden', name !== 'campaigns');
     els.wizardScreen.classList.toggle('hidden', name !== 'wizard');
@@ -1236,18 +1411,30 @@
         return res.json();
       })
       .then(function (list) {
-        // showScreen must happen HERE, explicitly: the SSE hello handler
+        // enterAfterAuth must be called HERE, explicitly: the SSE hello handler
         // deliberately never navigates away from the PIN screen, so without
-        // this line a correct PIN validated fine server-side while the page
-        // stayed frozen on the PIN screen (the launch-day phone bug).
-        showScreen('campaigns');
-        renderCampaignList(list);
-        connectSse();
+        // this a correct PIN validated fine server-side while the page stayed
+        // frozen on the PIN screen (the launch-day phone bug).
+        enterAfterAuth(list);
       })
       .catch(function () {
         // apiFetch already redirected to the PIN screen with an error on 401;
         // anything else, leave the field as-is so the player can retry.
       });
+  }
+
+  /**
+   * Where an authenticated player lands. Someone with campaigns goes straight
+   * to their shelf -- the title card is a front door, not a toll gate they
+   * should pay on every visit. Someone with nothing to resume gets the title
+   * card instead of an empty list, because "No campaigns yet" is a poor first
+   * thing to see and says nothing about what this is.
+   */
+  function enterAfterAuth(list) {
+    var hasCampaigns = !!(list && list.length);
+    showScreen(hasCampaigns ? 'campaigns' : 'title');
+    renderCampaignList(list || []);
+    connectSse();
   }
 
   // ---------------------------------------------------------------- campaigns screen
@@ -1414,6 +1601,8 @@
   }
 
   els.newCampaignBtn.addEventListener('click', function () { openWizard('new'); });
+  // The title card's only action: straight into character creation.
+  els.titleBeginBtn.addEventListener('click', function () { openWizard('new'); });
 
   // ---------------------------------------------------------------- SSE
 
@@ -1482,11 +1671,14 @@
       rollUi = { phase: session.pendingRoll ? 'waiting' : 'idle', reveal: null };
       if (session.campaign) {
         showScreen('play');
-      } else if (currentScreen !== 'pin' && currentScreen !== 'wizard') {
+      } else if (currentScreen !== 'pin' && currentScreen !== 'wizard' && currentScreen !== 'title') {
         // Never yank the player out of an in-progress campaign/retire wizard
         // just because a stray hello (e.g. a reconnect) reports no campaign
         // yet -- only an explicit cancel or a successful submission should
-        // leave that screen.
+        // leave that screen. The title card is exempt for the same reason and
+        // needs to be: connectSse() runs immediately after showing it, so
+        // without this the hello that follows replaced the front door with an
+        // empty campaign list every time.
         showScreen('campaigns');
         loadCampaigns();
       }
@@ -1495,6 +1687,9 @@
       renderDiceLine();
       renderRollSheet();
       renderInputState();
+      // From the snapshot, so a phone that locked and reconnected mid-scene gets
+      // its chips back instead of silently losing them for the rest of the turn.
+      renderSuggestions(session.suggestions || []);
     });
 
     evtSource.addEventListener('story', function (e) {
@@ -1515,6 +1710,9 @@
       var wasEmpty = partial.length === 0;
       partial = data.text;
       renderStreamingBubble();
+      // The "thinking" row is only for the silence BEFORE the first token, so
+      // the moment prose starts arriving it has to go.
+      if (wasEmpty !== (partial.length === 0)) renderInputState();
       if (wasEmpty && partial.length > 0) autoScroll(true);
       else autoScroll(false);
     });
@@ -1527,6 +1725,12 @@
     evtSource.addEventListener('dice', function (e) {
       session.diceMessage = JSON.parse(e.data).message;
       renderDiceLine();
+    });
+
+    evtSource.addEventListener('suggest', function (e) {
+      var actions = JSON.parse(e.data).actions || [];
+      if (session) session.suggestions = actions;
+      renderSuggestions(actions);
     });
 
     evtSource.addEventListener('busy', function (e) {
@@ -1891,6 +2095,57 @@
     var showStop = busy && !rolling;
     els.stopBtn.classList.toggle('hidden', !showStop);
     els.sendBtn.classList.toggle('hidden', showStop);
+    // Only while the DM is actually composing: during a pending roll the dice
+    // sheet already owns the player's attention, and nothing is being written.
+    var thinking = busy && !rolling && partial.length === 0;
+    els.thinkingRow.classList.toggle('hidden', !thinking);
+  }
+
+  // ---------------------------------------------------------------- suggested actions
+
+  var SUGGEST_HIDDEN_KEY = 'dnd-hide-suggestions';
+  var suggestionsHidden = localStorage.getItem(SUGGEST_HIDDEN_KEY) === '1';
+
+  /**
+   * Renders the DM's suggested actions as chips. Tapping one PUTS IT IN THE
+   * INPUT rather than submitting it, so a suggestion is a starting point the
+   * player can edit or discard -- the point is to break the blank-page freeze,
+   * not to turn the game into a menu.
+   */
+  function renderSuggestions(actions) {
+    var row = els.suggestRow;
+    row.innerHTML = '';
+    var list = suggestionsHidden ? [] : (actions || []);
+    if (list.length === 0) {
+      row.classList.add('hidden');
+      return;
+    }
+    list.forEach(function (action) {
+      var chip = el('button', 'suggest-chip', action);
+      chip.type = 'button';
+      chip.title = action;
+      chip.addEventListener('click', function () {
+        els.textInput.value = action;
+        els.textInput.focus();
+        // Nothing is committed yet, so the chips have not become stale --
+        // but the player has made their pick, so get out of the way.
+        row.classList.add('hidden');
+      });
+      row.appendChild(chip);
+    });
+
+    var hide = el('button', 'suggest-hide', '×');
+    hide.type = 'button';
+    hide.title = 'Hide suggestions for good';
+    hide.setAttribute('aria-label', 'Hide suggested actions');
+    hide.addEventListener('click', function () {
+      suggestionsHidden = true;
+      localStorage.setItem(SUGGEST_HIDDEN_KEY, '1');
+      renderSuggestions([]);
+    });
+    row.appendChild(hide);
+
+    row.classList.remove('hidden');
   }
 
   function sendAction(text) {
@@ -2060,6 +2315,10 @@
       var node = document.getElementById(id);
       if (node) node.innerHTML = d20Svg(17);
     });
+    // The title card's die is the largest thing on the screen after the
+    // wordmark, so it gets its own radius rather than the 17px brand mark.
+    var titleDie = document.getElementById('brand-die-title');
+    if (titleDie) titleDie.innerHTML = d20Svg(46);
     var tNode = document.getElementById('transition-die');
     if (tNode) tNode.innerHTML = d20Svg(30);
   }
@@ -2205,15 +2464,25 @@
 
   // ---------------------------------------------------------------- campaign creation + retire wizard
 
+  // Four dense steps, not nine sparse ones. Every step used to be a single
+  // question alone on a 1440x900 screen -- two of them were one text input in
+  // an otherwise empty page -- so making a character was nine clicks through
+  // mostly-empty screens before any fiction happened. These group the same
+  // questions by what the player is actually deciding, and the review is
+  // appended to whichever step is last (see renderWizardStep) so no step
+  // exists purely to confirm.
   var STEP_TITLES = {
-    name: 'Campaign Name', hero: 'Hero Name', class: 'Class', race: 'Race', background: 'Background',
-    stats: 'Ability Scores', theme: 'World Theme', rating: 'Content Rating', confirm: 'Confirm'
+    identity: 'Your Hero',
+    character: 'Class & Race',
+    abilities: 'Ability Scores',
+    world: 'World & Review',
   };
 
   var STEP_RENDERERS = {
-    name: renderStepName, hero: renderStepHero, class: renderStepClass, race: renderStepRace,
-    background: renderStepBackground, stats: renderStepStats, theme: renderStepTheme,
-    rating: renderStepRating, confirm: renderStepConfirm
+    identity: renderStepIdentity,
+    character: renderStepCharacter,
+    abilities: renderStepAbilities,
+    world: renderStepWorld,
   };
 
   function loadPresets() {
@@ -2228,8 +2497,8 @@
     wizard = {
       mode: mode,
       steps: mode === 'new'
-        ? ['name', 'hero', 'class', 'race', 'background', 'stats', 'theme', 'rating', 'confirm']
-        : ['hero', 'class', 'race', 'background', 'stats', 'confirm'],
+        ? ['identity', 'character', 'abilities', 'world']
+        : ['identity', 'character', 'abilities'],
       stepIndex: 0,
       data: { name: '', heroName: '', classId: null, race: null, backgroundId: null, themeChoice: null, themeId: null, themeSeed: '', themeCustomText: '', themeLabel: '', contentRating: 'PG-13' },
       presets: null,
@@ -2256,8 +2525,13 @@
 
   function currentStepName() { return wizard.steps[wizard.stepIndex]; }
 
+  /** True on the final step, which is the one that carries the review block and the submit button. */
+  function isLastStep() { return wizard.stepIndex === wizard.steps.length - 1; }
+
   function stepTitle(step) {
-    if (step === 'confirm') return wizard.mode === 'new' ? 'Confirm & Begin' : 'Confirm New Hero';
+    // Retire mode never asks about the world (it keeps the existing one), so
+    // its last step is 'abilities' and that is where the review lands.
+    if (step === 'abilities' && wizard.mode !== 'new') return 'Ability Scores & Review';
     return STEP_TITLES[step] || '';
   }
 
@@ -2275,23 +2549,53 @@
     return STAT_ORDER.map(function (stat) { return byStat[stat]; });
   }
 
-  function finalStatArray() {
+  /**
+   * The player's BASE assignment, in STAT_ORDER. This is what gets POSTed as
+   * statValues: the server applies the racial bonus itself (buildCharacter ->
+   * applyRaceBonuses), so sending pre-bonus numbers is correct and sending
+   * post-bonus ones would double them.
+   */
+  function baseStatArray() {
     var pool = wizard.pools[wizard.statsMethod];
     var assignment = wizard.assignments[wizard.statsMethod];
     return STAT_ORDER.map(function (stat, pos) { return pool[assignment[pos]]; });
   }
 
+  /** The selected race's bonuses keyed by stat ({} when no race is chosen yet). */
+  function raceBonuses() {
+    if (!wizard.data.race || !wizard.presets) return {};
+    var found = wizard.presets.races.filter(function (r) { return r.id === wizard.data.race; })[0];
+    return (found && found.bonuses) || {};
+  }
+
+  /**
+   * What the hero will ACTUALLY start with: base assignment + racial bonus.
+   * Display only. The old wizard printed the base pool under a heading that
+   * said "Final", so an Elf who would really begin at DEX 17 was shown DEX 15
+   * on both the stats step and the review -- and then saw 17 in the HUD one
+   * screen later.
+   */
+  function displayFinalStats() {
+    var base = baseStatArray();
+    var bonuses = raceBonuses();
+    return STAT_ORDER.map(function (stat, i) {
+      var bonus = bonuses[stat] || 0;
+      return { stat: stat, base: base[i], bonus: bonus, total: base[i] + bonus };
+    });
+  }
+
+  /** A composite step is valid only when every question on it is answered -- background stays optional. */
   function stepValid(step) {
     switch (step) {
-      case 'name': return wizard.data.name.trim().length > 0;
-      case 'hero': return wizard.data.heroName.trim().length > 0;
-      case 'class': return !!wizard.data.classId;
-      case 'race': return !!wizard.data.race;
-      case 'background': return true; // optional
-      case 'stats': return !!(wizard.pools[wizard.statsMethod] && wizard.assignments[wizard.statsMethod]);
-      case 'theme': return !!(wizard.data.themeSeed && wizard.data.themeSeed.trim().length > 0);
-      case 'rating': return !!wizard.data.contentRating;
-      case 'confirm': return true;
+      case 'identity':
+        return (
+          wizard.data.heroName.trim().length > 0 &&
+          (wizard.mode !== 'new' || wizard.data.name.trim().length > 0)
+        );
+      case 'character': return !!wizard.data.classId && !!wizard.data.race;
+      case 'abilities': return !!(wizard.pools[wizard.statsMethod] && wizard.assignments[wizard.statsMethod]);
+      case 'world':
+        return !!(wizard.data.themeSeed && wizard.data.themeSeed.trim().length > 0) && !!wizard.data.contentRating;
       default: return true;
     }
   }
@@ -2299,7 +2603,7 @@
   function updateNextButton() {
     var step = currentStepName();
     els.wizardNextBtn.disabled = !stepValid(step) || wizard.submitting;
-    if (step === 'confirm') {
+    if (isLastStep()) {
       els.wizardNextBtn.textContent = wizard.mode === 'new' ? 'Begin Adventure ▶' : 'Retire & Continue ▶';
     } else {
       els.wizardNextBtn.textContent = 'Next ▶';
@@ -2318,7 +2622,13 @@
     els.wizardBackBtn.classList.toggle('hidden', idx === 0);
     els.wizardBody.innerHTML = '';
     els.wizardError.textContent = '';
-    STEP_RENDERERS[currentStepName()]();
+    // Step renderers BUILD and return their container rather than appending it,
+    // so the review can be folded into whichever step happens to be last (which
+    // differs between new-campaign and retire mode) instead of needing a step
+    // of its own that asks nothing.
+    var wrap = STEP_RENDERERS[currentStepName()]();
+    if (isLastStep()) sectionReview(wrap);
+    els.wizardBody.appendChild(wrap);
     updateNextButton();
   }
 
@@ -2338,7 +2648,9 @@
 
   els.wizardBackBtn.addEventListener('click', goBack);
   els.wizardNextBtn.addEventListener('click', function () {
-    if (currentStepName() === 'confirm') submitWizard();
+    // isLastStep(), not a hardcoded step name: the review lives on whichever
+    // step is last, and that differs between new-campaign and retire mode.
+    if (isLastStep()) submitWizard();
     else goNext();
   });
   els.wizardCancelBtn.addEventListener('click', function () {
@@ -2347,46 +2659,64 @@
     if (wasRetire) {
       showScreen('play');
     } else {
+      // Back to wherever the player came from: the shelf if they have saves,
+      // the title card if backing out of creation would otherwise strand them
+      // on an empty list.
       showScreen('campaigns');
-      loadCampaigns();
+      apiFetch('/api/campaigns')
+        .then(function (res) { return res.json(); })
+        .then(function (list) {
+          renderCampaignList(list || []);
+          if (!(list && list.length)) showScreen('title');
+        })
+        .catch(function () {});
     }
   });
 
   // ---- step renderers ----
 
-  function renderStepName() {
-    var wrap = el('div', 'wizard-step');
-    wrap.appendChild(el('div', 'wizard-q', 'What shall we call this campaign?'));
+  /** One labelled text field, wired to `wizard.data[key]`. Returns the input so the caller can focus it. */
+  function wizardField(wrap, label, key, placeholder) {
+    var field = el('div', 'wizard-field');
+    field.appendChild(el('label', 'wizard-field-label', label));
     var input = document.createElement('input');
     input.className = 'wizard-input';
-    input.placeholder = 'e.g. The Sunken Spire';
+    input.placeholder = placeholder;
     input.autocomplete = 'off';
-    input.value = wizard.data.name;
-    input.addEventListener('input', function () { wizard.data.name = input.value; updateNextButton(); });
-    wrap.appendChild(input);
-    els.wizardBody.appendChild(wrap);
-    setTimeout(function () { input.focus(); }, 30);
+    input.value = wizard.data[key];
+    input.addEventListener('input', function () { wizard.data[key] = input.value; updateNextButton(); });
+    field.appendChild(input);
+    wrap.appendChild(field);
+    return input;
   }
 
-  function renderStepHero() {
+  function renderStepIdentity() {
     var wrap = el('div', 'wizard-step');
     if (wizard.mode === 'retire') {
       wrap.appendChild(el('div', 'wizard-intro-note', 'Your current hero steps down. The world, quests, and location carry on with the new hero you build here.'));
+      wrap.appendChild(el('div', 'wizard-q', 'Name your new hero'));
+      var heroOnly = wizardField(wrap, 'Hero name', 'heroName', 'e.g. Ariel Duskbane');
+      setTimeout(function () { heroOnly.focus(); }, 30);
+      return wrap;
     }
-    wrap.appendChild(el('div', 'wizard-q', 'Name your hero'));
-    var input = document.createElement('input');
-    input.className = 'wizard-input';
-    input.placeholder = 'e.g. Ariel Duskbane';
-    input.autocomplete = 'off';
-    input.value = wizard.data.heroName;
-    input.addEventListener('input', function () { wizard.data.heroName = input.value; updateNextButton(); });
-    wrap.appendChild(input);
-    els.wizardBody.appendChild(wrap);
-    setTimeout(function () { input.focus(); }, 30);
+    wrap.appendChild(el('div', 'wizard-q', 'Name the campaign and its hero'));
+    var nameInput = wizardField(wrap, 'Campaign name', 'name', 'e.g. The Sunken Spire');
+    wizardField(wrap, 'Hero name', 'heroName', 'e.g. Ariel Duskbane');
+    wrap.appendChild(el('div', 'wizard-hint', 'The campaign is the world and its story; the hero is who you play in it.'));
+    setTimeout(function () { nameInput.focus(); }, 30);
+    return wrap;
   }
 
-  function renderStepClass() {
+  /** Class + race + background: everything that defines who the hero is, on one screen. */
+  function renderStepCharacter() {
     var wrap = el('div', 'wizard-step');
+    sectionClass(wrap);
+    sectionRace(wrap);
+    sectionBackground(wrap);
+    return wrap;
+  }
+
+  function sectionClass(wrap) {
     wrap.appendChild(el('div', 'wizard-q', 'Pick a class'));
     var list = el('div', 'wizard-card-list');
     wizard.presets.classes.forEach(function (c) {
@@ -2400,11 +2730,9 @@
       list.appendChild(card);
     });
     wrap.appendChild(list);
-    els.wizardBody.appendChild(wrap);
   }
 
-  function renderStepRace() {
-    var wrap = el('div', 'wizard-step');
+  function sectionRace(wrap) {
     wrap.appendChild(el('div', 'wizard-q', 'Choose a race'));
     var list = el('div', 'wizard-card-list');
     wizard.presets.races.forEach(function (r) {
@@ -2416,12 +2744,11 @@
       list.appendChild(card);
     });
     wrap.appendChild(list);
-    els.wizardBody.appendChild(wrap);
   }
 
-  function renderStepBackground() {
-    var wrap = el('div', 'wizard-step');
+  function sectionBackground(wrap) {
     wrap.appendChild(el('div', 'wizard-q', 'Background'));
+    wrap.appendChild(el('div', 'wizard-hint', 'Optional — it grants a small extra and gives the DM a thread to pull on.'));
     var list = el('div', 'wizard-card-list');
     var noneCard = el('button', 'wizard-pick-card' + (!wizard.data.backgroundId ? ' selected' : ''));
     noneCard.type = 'button';
@@ -2438,7 +2765,6 @@
       list.appendChild(card);
     });
     wrap.appendChild(list);
-    els.wizardBody.appendChild(wrap);
   }
 
   function rollNewStats() {
@@ -2452,7 +2778,7 @@
     });
   }
 
-  function renderStepStats() {
+  function renderStepAbilities() {
     var wrap = el('div', 'wizard-step');
     wrap.appendChild(el('div', 'wizard-q', 'Assign ability scores'));
 
@@ -2526,18 +2852,28 @@
     });
     wrap.appendChild(assignWrap);
 
+    // Post-race totals, with the bonus shown as its own +N so the player can
+    // see WHERE the difference came from rather than wondering why "Final"
+    // disagrees with the number they just picked.
     var finalRow = el('div', 'wizard-final-preview');
+    var raceLabel = wizard.data.race ? presetName('races', wizard.data.race) : '';
     finalRow.appendChild(el('span', 'wizard-pool-label', 'Final'));
-    STAT_ORDER.forEach(function (stat, pos) {
-      finalRow.appendChild(el('span', 'pool-chip final', stat.toUpperCase() + ' ' + pool[assignment[pos]]));
+    displayFinalStats().forEach(function (s) {
+      var chip = el('span', 'pool-chip final' + (s.bonus ? ' boosted' : ''));
+      chip.appendChild(el('span', 'chip-stat', s.stat.toUpperCase()));
+      chip.appendChild(el('span', 'chip-total', String(s.total)));
+      if (s.bonus) chip.appendChild(el('span', 'chip-bonus', (s.bonus > 0 ? '+' : '') + s.bonus));
+      finalRow.appendChild(chip);
     });
     wrap.appendChild(finalRow);
+    if (raceLabel && displayFinalStats().some(function (s) { return s.bonus; })) {
+      wrap.appendChild(el('div', 'wizard-hint', 'Includes the ' + raceLabel + ' bonus — these are the scores your hero starts with.'));
+    }
 
-    els.wizardBody.appendChild(wrap);
+    return wrap;
   }
 
-  function renderStepTheme() {
-    var wrap = el('div', 'wizard-step');
+  function sectionTheme(wrap) {
     wrap.appendChild(el('div', 'wizard-q', "Choose the world's theme"));
     var list = el('div', 'wizard-card-list');
     wizard.presets.themes.forEach(function (t) {
@@ -2581,12 +2917,17 @@
       });
       wrap.appendChild(input);
     }
-
-    els.wizardBody.appendChild(wrap);
   }
 
-  function renderStepRating() {
+  /** Theme + content rating: everything about the world rather than the hero. */
+  function renderStepWorld() {
     var wrap = el('div', 'wizard-step');
+    sectionTheme(wrap);
+    sectionRating(wrap);
+    return wrap;
+  }
+
+  function sectionRating(wrap) {
     wrap.appendChild(el('div', 'wizard-q', 'Content rating'));
     var list = el('div', 'wizard-rating-list');
     var options = [
@@ -2602,7 +2943,6 @@
       list.appendChild(card);
     });
     wrap.appendChild(list);
-    els.wizardBody.appendChild(wrap);
   }
 
   function presetName(kind, id) {
@@ -2611,8 +2951,16 @@
     return found ? found.name : id;
   }
 
-  function renderStepConfirm() {
-    var wrap = el('div', 'wizard-step');
+  /**
+   * The final tally, folded into the bottom of the last step rather than
+   * occupying a screen of its own. Only renders once every question it reports
+   * on has an answer, so it can't show "Class: None" while the player is still
+   * choosing on the same screen.
+   */
+  function sectionReview(wrap) {
+    if (!stepValid(currentStepName())) return;
+
+    wrap.appendChild(el('div', 'wizard-divider'));
     wrap.appendChild(el('div', 'wizard-q', wizard.mode === 'new' ? 'Review your legend' : 'Review your new hero'));
     var list = el('div', 'wizard-summary');
     function row(label, value) {
@@ -2626,14 +2974,19 @@
     row('Class', presetName('classes', wizard.data.classId));
     row('Race', presetName('races', wizard.data.race));
     row('Background', wizard.data.backgroundId ? presetName('backgrounds', wizard.data.backgroundId) : 'None');
-    var stats = finalStatArray();
-    row('Stats', STAT_ORDER.map(function (s, i) { return s.toUpperCase() + ' ' + stats[i]; }).join('  '));
+    // Post-race totals, matching the stats step and the HUD the player is about
+    // to see -- this row used to print the pre-bonus numbers.
+    row(
+      'Stats',
+      displayFinalStats()
+        .map(function (s) { return s.stat.toUpperCase() + ' ' + s.total; })
+        .join('  '),
+    );
     if (wizard.mode === 'new') {
       row('Theme', wizard.data.themeLabel || wizard.data.themeSeed);
       row('Rating', wizard.data.contentRating);
     }
     wrap.appendChild(list);
-    els.wizardBody.appendChild(wrap);
   }
 
   function submitWizard() {
@@ -2642,7 +2995,9 @@
     els.wizardError.textContent = '';
     updateNextButton();
 
-    var statValues = finalStatArray();
+    // Base, deliberately: the server adds the racial bonus in buildCharacter.
+    // Sending displayFinalStats() here would apply it twice.
+    var statValues = baseStatArray();
 
     if (wizard.mode === 'new') {
       var body = {
@@ -2714,6 +3069,15 @@
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (body) {
         if (!body) return;
+        // 'none' is --no-pin: there is no credential to ask for, so the login
+        // screen must never be shown. Previously this case fell through to the
+        // PIN treatment and demanded a 6-digit code that had never been printed
+        // and did not exist -- an unpassable door on the one mode meant for
+        // frictionless play.
+        if (body.mode === 'none') {
+          authMode = 'none';
+          return;
+        }
         if (body.mode === 'pin') {
           input.classList.remove('code-mode');
           input.setAttribute('inputmode', 'numeric');
@@ -2735,25 +3099,28 @@
   }
 
   function boot() {
-    applyAuthMode();
-    if (!pin) { showScreen('pin'); return; }
-    apiFetch('/api/campaigns')
-      .then(function (res) {
-        if (!res.ok) throw new Error('unexpected');
-        return res.json();
-      })
-      .then(function (list) {
-        // Explicit, not left to the SSE hello race: without this the page
-        // stayed blank until (and unless) the hello event happened to arrive.
-        showScreen('campaigns');
-        renderCampaignList(list);
-        connectSse();
-      })
-      .catch(function () {
-        // apiFetch already routed to the PIN screen on 401; anything else
-        // (server unreachable) just leaves the PIN screen as the safe default.
-        if (currentScreen === null) showScreen('pin');
-      });
+    // Awaited, unlike before: the decision "show the login screen at all" now
+    // depends on the answer, so acting before it arrives would flash the PIN
+    // screen at a --no-pin server.
+    applyAuthMode().then(function () {
+      if (authMode !== 'none' && !pin) { showScreen('pin'); return; }
+      apiFetch('/api/campaigns')
+        .then(function (res) {
+          if (!res.ok) throw new Error('unexpected');
+          return res.json();
+        })
+        .then(function (list) {
+          // Explicit, not left to the SSE hello race: without this the page
+          // stayed blank until (and unless) the hello event happened to arrive.
+          enterAfterAuth(list);
+        })
+        .catch(function () {
+          // apiFetch already routed to the PIN screen on 401; anything else
+          // (server unreachable) leaves a sensible default rather than a blank
+          // page -- the title card when there is nothing to ask for.
+          if (currentScreen === null) showScreen(authMode === 'none' ? 'title' : 'pin');
+        });
+    });
   }
 
   els.pinInput.value = '';

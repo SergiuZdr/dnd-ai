@@ -147,9 +147,28 @@ export const RACES: RacePreset[] = [
   },
 ];
 
-/** Applies a race's flat stat bonuses on top of the given (rolled/array-assigned) base stats. Unknown race name is a no-op. */
+/**
+ * Looks a race up by EITHER its id ('elf') or its display name ('Elf'),
+ * case-insensitively. Both spellings reach this code from real callers: the
+ * terminal wizard picks a preset and passes `race.name`, while the web wizard
+ * renders cards from /api/presets and posts back the `id`. Matching on name
+ * alone is what silently zeroed every web character's racial bonuses -- the
+ * lookup missed, applyRaceBonuses no-op'd, and the id got stored as the
+ * character's race verbatim ("elf Rogue" in the HUD, and into the DM prompt).
+ */
+export function findRace(idOrName: string): RacePreset | undefined {
+  const needle = idOrName.trim().toLowerCase();
+  return RACES.find((r) => r.id.toLowerCase() === needle || r.name.toLowerCase() === needle);
+}
+
+/** The display name for a race given an id or name ('elf' -> 'Elf'); unknown input is returned unchanged so a custom/legacy race string is never destroyed. */
+export function canonicalRaceName(idOrName: string): string {
+  return findRace(idOrName)?.name ?? idOrName;
+}
+
+/** Applies a race's flat stat bonuses on top of the given (rolled/array-assigned) base stats. Accepts an id or a display name; an unknown race is a no-op. */
 export function applyRaceBonuses(stats: Stats, raceName: string): Stats {
-  const race = RACES.find((r) => r.name === raceName);
+  const race = findRace(raceName);
   if (!race) return { ...stats };
   const result = { ...stats };
   for (const key of Object.keys(race.bonuses) as (keyof Stats)[]) {
@@ -287,6 +306,10 @@ function buildCharacter(
   // (highest value -> the class's top stat) -- the terminal wizard's behavior.
   const baseStats = explicitStats ?? assignStats(statValues, preset.statPriority);
   const stats = applyRaceBonuses(baseStats, race);
+  // Store the display name, never the wire id: this string is shown in the HUD
+  // and interpolated into the DM's opening prompt, so an id would read as
+  // "elf Rogue" on screen and to the model.
+  const raceName = canonicalRaceName(race);
   const maxHp = Math.max(1, preset.hitBase + abilityMod(stats.con));
   const ac = preset.acBase + Math.max(0, Math.min(2, abilityMod(stats.dex)));
   const inventory = preset.starterItems.map((item) => ({ ...item }));
@@ -296,7 +319,7 @@ function buildCharacter(
   return {
     name: heroName,
     className: preset.name,
-    race,
+    race: raceName,
     background: background?.name ?? '',
     backgroundFact: background?.fact ?? '',
     level: 1,

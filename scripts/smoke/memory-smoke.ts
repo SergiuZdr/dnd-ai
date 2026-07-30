@@ -33,7 +33,11 @@ function buildFixtureState(): GameState {
     character: {
       name: 'Sable',
       className: 'Ranger',
-      race: 'Half-Elf',
+      // Must be a name in newCampaign.ts's RACES -- applyRaceBonuses() matches
+      // on the display name and silently no-ops on anything else, so a race the
+      // wizard can't actually produce (this said 'Half-Elf' for a while) makes
+      // the fixture quietly unlike any real save.
+      race: 'Elf',
       background: 'Wanderer',
       backgroundFact: 'has wandered many roads before this one and rarely stays anywhere for long',
       level: 1,
