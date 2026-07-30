@@ -19,13 +19,19 @@ primary_region = "iad"  # pick the region closest to you/your players
 [env]
   HOST = "0.0.0.0"
   SAVES_DIR = "/data/saves"
-  DND_DM_BACKEND = "openai"
+  # "dual" splits the turn: a reliable tool-caller resolves mechanics (the
+  # referee, DND_OPENAI_MODEL) and a separate, more permissive model writes the
+  # prose (the narrator, DND_OPENAI_NARRATOR_MODEL). Use "openai" instead to run
+  # both halves on one model. See docs/DEPLOY.md.
+  DND_DM_BACKEND = "dual"
   DND_OPENAI_BASE_URL = "https://openrouter.ai/api/v1"
-  # Placeholder -- swap for whatever capable model you've proven with
-  # `npm run smoke:openai` (the P1 PRD's spike found small/free models too
-  # weak for reliable tool-calling; a 70B-class instruct model is a safe
-  # starting point).
-  DND_OPENAI_MODEL = "meta-llama/llama-3.1-70b-instruct"
+  # Both are placeholders -- swap for whatever you've actually proven with
+  # `npm run smoke:dual` (or `npm run smoke:openai` on the single-model path).
+  # The P1 PRD's spike found small/free models too weak for reliable
+  # tool-calling, so the referee in particular wants a 70B-class instruct model.
+  # These two are the pair docs/DEPLOY.md recommends.
+  DND_OPENAI_MODEL = "meta-llama/llama-3.3-70b-instruct"
+  DND_OPENAI_NARRATOR_MODEL = "nousresearch/hermes-3-llama-3.1-70b"
 
 # Persistent volume for saves/ -- survives restarts and redeploys. Create it
 # once with `fly volumes create data --size 1` (1 GB is generous for JSON

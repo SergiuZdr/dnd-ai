@@ -1,5 +1,5 @@
 // Owner-run live smoke test for the OpenAI-compatible DM backend (P1). Mirror
-// of scripts/smoke.ts, but against OpenAiDmSession + a REAL OpenAI-compatible
+// of scripts/smoke/smoke.ts, but against OpenAiDmSession + a REAL OpenAI-compatible
 // endpoint (Ollama / OpenRouter / self-host) instead of the Claude Agent SDK
 // -- proves tool-calling, streaming, and the interactive-roll pause all work
 // end-to-end against whatever the owner configured in settings.json's

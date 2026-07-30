@@ -229,7 +229,7 @@ export function listCampaigns(baseDir: string = defaultBaseDir()): CampaignListi
   return listings;
 }
 
-/** Where deleteCampaign() moves retired saves. Dot-prefixed so listCampaigns' directory scan and the migration script both skip it. */
+/** Where deleteCampaign() moves retired saves. listCampaigns() skips it by name explicitly (see there); scripts/admin/migrate-to-players.ts never mistakes it for a campaign either, since a deleted save sits one level deeper and so has no campaign.json directly inside. Dot-prefixed on top of that, to stay out of the way of shell globs and finder listings. */
 export const TRASH_DIR = '.deleted';
 
 /**

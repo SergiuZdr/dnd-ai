@@ -30,6 +30,7 @@ import type { DmError, DmSessionCallbacks, DmSessionConfig } from '../ai/dm';
 import { OpenAiDmSession } from '../ai/openaiDm';
 import { DualModelDmSession } from '../ai/dualDm';
 import { summarizeChunk } from '../ai/summarizer';
+import { splitSuggestions, visibleStreamText } from '../ai/suggestions';
 import { saveGame, appendTranscript, readTranscript } from './saves';
 import type { TranscriptEntry } from './saves';
 import { loadSettings } from './settings';
@@ -93,12 +94,19 @@ export interface ControllerCallbacks {
   /**
    * Fires once per successful gain/loss tool call (modify_gold / award_xp /
    * add_item / remove_item) with a structured delta -- see LedgerDelta.
-   * Optional (unlike the contract's plain-required signature) so existing
-   * ControllerCallbacks implementers (the ink TUI's App.tsx, out of this
-   * subagent's scope) keep compiling unchanged; GameBridge implements it,
-   * App.tsx simply omits it and gets no ledger toasts for now.
+   * Optional so an implementer that has no use for it keeps compiling
+   * unchanged: GameBridge implements it (the web client's "YOU GAINED" toast),
+   * while the legacy ink TUI's App.tsx omits it and simply gets no toasts --
+   * the sidebar already shows the resulting numbers there.
    */
   onLedgerGain?: (delta: LedgerDelta) => void;
+  /**
+   * The DM's suggested next actions for the scene just narrated (0-3 short
+   * labels), or an empty array to clear them -- fired on every turn completion
+   * and when the player acts, so stale chips from the previous scene can never
+   * linger. Optional: the ink TUI omits it and simply shows no chips.
+   */
+  onSuggestions?: (actions: string[]) => void;
   onBusyChange: (busy: boolean) => void;
   /** Friendly errors, rate-limit notes, interrupt confirmations. */
   onSystemNote: (note: string) => void;
@@ -390,6 +398,10 @@ export class GameController {
       { role: 'player', text: trimmed, ts: new Date().toISOString() },
       this.baseDir,
     );
+    // The previous scene's chips describe a moment that has now passed --
+    // leaving them up invites the player to tap an action that no longer makes
+    // any sense. The next turn supplies its own.
+    this.cb.onSuggestions?.([]);
     this.setBusy(true);
 
     // Wire-only wrapper: transcript and story log above got the clean text;
@@ -590,7 +602,10 @@ export class GameController {
 
   private emitStreamNow(): void {
     this.lastStreamEmitAt = Date.now();
-    this.cb.onStreamText(this.streamBuffer);
+    // visibleStreamText, not the raw buffer: the DM's turn ends with a
+    // machine-read [[SUGGEST: ...]] trailer, and streaming it verbatim would
+    // let the marker type itself out on screen before being stripped.
+    this.cb.onStreamText(visibleStreamText(this.streamBuffer));
   }
 
   private cancelStreamThrottle(): void {
@@ -600,13 +615,19 @@ export class GameController {
     }
   }
 
-  private handleTurnComplete(text: string): void {
+  private handleTurnComplete(rawText: string): void {
     this.cancelStreamThrottle();
     this.streamBuffer = '';
     this.cb.onStreamText('');
 
+    // Split before anything persists or renders: the suggestions trailer must
+    // never reach the story log, the transcript (and so the context brief and
+    // the chronicle summarizer), or the player's screen.
+    const { text, suggestions } = splitSuggestions(rawText);
+
     this.cb.onStoryAppend({ id: this.nextStoryId++, kind: 'dm', text });
     appendTranscript(this.state.campaign.slug, { role: 'dm', text, ts: new Date().toISOString() }, this.baseDir);
+    this.cb.onSuggestions?.(suggestions);
 
     this.forceSave();
     this.setBusy(false);

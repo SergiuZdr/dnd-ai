@@ -32,6 +32,12 @@ export interface HelloSnapshot {
   busy: boolean;
   pendingRoll: PendingRollRequest | null;
   diceMessage: string;
+  /**
+   * Unlike the transient 'note'/'ledger' events, suggestions ARE part of the
+   * current scene: a phone that locks and reconnects mid-scene must get its
+   * chips back, or the buttons silently disappear for the rest of the turn.
+   */
+  suggestions: string[];
 }
 
 export type SseSink = (event: SseEvent) => void;
@@ -56,6 +62,7 @@ export class GameBridge {
   private busy = false;
   private pendingRoll: PendingRollRequest | null = null;
   private diceMessage = '';
+  private suggestions: string[] = [];
   /** Counts DOWN (like App.tsx's systemIdRef for the TUI) so locally-synthesized entries (appendSystemNote) never collide with the controller's own positive, incrementing StoryEntry ids. */
   private systemIdCounter = 0;
 
@@ -80,6 +87,7 @@ export class GameBridge {
     this.busy = false;
     this.pendingRoll = null;
     this.diceMessage = '';
+    this.suggestions = [];
     this.systemIdCounter = 0;
 
     return {
@@ -124,6 +132,12 @@ export class GameBridge {
       onLedgerGain: (delta) => {
         this.broadcast({ event: 'ledger', data: delta });
       },
+      // Mirrored (unlike 'note'/'ledger') because chips belong to the scene on
+      // screen -- see HelloSnapshot.suggestions.
+      onSuggestions: (actions) => {
+        this.suggestions = actions;
+        this.broadcast({ event: 'suggest', data: { actions } });
+      },
     };
   }
 
@@ -135,6 +149,7 @@ export class GameBridge {
     this.busy = false;
     this.pendingRoll = null;
     this.diceMessage = '';
+    this.suggestions = [];
     this.systemIdCounter = 0;
   }
 
@@ -169,6 +184,7 @@ export class GameBridge {
       busy: this.busy,
       pendingRoll: this.pendingRoll,
       diceMessage: this.diceMessage,
+      suggestions: [...this.suggestions],
     };
   }
 

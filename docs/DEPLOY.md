@@ -2,7 +2,9 @@
 
 Goal: the game runs **always-on, on a public URL, with your laptop off**, and every player's turn spends **0 Claude tokens** (P1's `dmBackend:"openai"` path, talking to an OpenAI-compatible endpoint like OpenRouter; or P1.5's `dmBackend:"dual"` path — see below). Nothing below requires committing a `settings.json` or an API key — the server is configured **entirely via environment variables and secrets**.
 
-Read this alongside `docs/SRD-cloud-open-model-hud.md` (why) and `docs/PRD-P1-pluggable-dm-backend.md` (the OpenAI-compatible DM backend this deploy runs).
+"0 Claude tokens" covers the chronicle summarizer too, not just play: `src/ai/summarizer.ts` follows the same `dmBackend` setting, so on `openai` **and** `dual` the chapter rollups go to your endpoint as well. (This is worth stating because it was briefly untrue — `dual` used to fall through to the Agent SDK, which on a headless host has no login to use and failed every rollup.)
+
+Read this alongside `docs/requirements/SRD-cloud-open-model-hud.md` (why) and `docs/requirements/PRD-P1-pluggable-dm-backend.md` (the OpenAI-compatible DM backend this deploy runs).
 
 ## What's new here vs. local dev
 
@@ -12,7 +14,7 @@ Read this alongside `docs/SRD-cloud-open-model-hud.md` (why) and `docs/PRD-P1-pl
 |---|---|---|---|
 | `PORT` | `src/web/serve.ts` | `3123` (or `--port`) | HTTP port to listen on |
 | `HOST` | `src/web/serve.ts` | `0.0.0.0` (or `--host`) | Interface to bind |
-| `GAME_PIN` | `src/web/serve.ts` | none — a fresh random PIN is generated **every boot** and printed to the console | Fixed PIN, so a cloud restart doesn't silently rotate the PIN nobody's watching the console for |
+| `GAME_PIN` | `src/web/serve.ts` | none — a fresh random PIN is generated **every boot** and printed to the console | Fixed PIN, so a cloud restart doesn't silently rotate the PIN nobody's watching the console for. **Ignored once any player is registered** — the server switches to per-player access codes then (see Security notes) |
 | `SAVES_DIR` | `src/web/serve.ts` | none — `createGameServer` falls back to `<cwd>/saves` | Where campaign saves live; point this at a mounted volume so saves survive a redeploy/restart |
 | `DND_DM_BACKEND` | `src/game/settings.ts` | none — falls back to `settings.json`'s `dmBackend` (default `"claude"`) | `"claude"`, `"openai"`, or `"dual"` — which `DmSession` implementation runs the DM |
 | `DND_OPENAI_BASE_URL` | `src/game/settings.ts` | none — falls back to `settings.json`'s `openai.baseUrl` | OpenAI-compatible endpoint, e.g. `https://openrouter.ai/api/v1` (shared by both models when `dmBackend:"dual"`) |
@@ -47,7 +49,7 @@ Look for `REFEREE TOOL-CALLING SCORE: >=3/4` and `NARRATOR CHECK: PASS`.
 | Secret | Set via | Purpose |
 |---|---|---|
 | `OPENROUTER_API_KEY` (or whatever `DND_OPENAI_API_KEY_ENV` names) | `fly secrets set` / host env | The actual API key for your chosen OpenAI-compatible endpoint |
-| `GAME_PIN` | `fly secrets set` / host env | The fixed PIN gating the public URL — treat it like a password, not a room number |
+| `GAME_PIN` | `fly secrets set` / host env | The fixed PIN gating the public URL — treat it like a password, not a room number. Only used while the player registry is empty; per-player access codes supersede it |
 
 ---
 
@@ -57,12 +59,14 @@ Free/small open models mangle tool-call arguments (see the P1 PRD's spike findin
 
 ```
 DND_OPENAI_BASE_URL=https://openrouter.ai/api/v1 \
-DND_OPENAI_MODEL=meta-llama/llama-3.1-70b-instruct \
+DND_OPENAI_MODEL=meta-llama/llama-3.3-70b-instruct \
 OPENROUTER_API_KEY=sk-... \
 npm run smoke:openai
 ```
 
 Look for `TOOL-CALLING SCORE: >=3/4`. Swap `DND_OPENAI_MODEL` and re-run until one clears it — that's the model you put in `fly.toml` / your host's env.
+
+Running `dmBackend:"dual"`? Prove that instead, with `npm run smoke:dual` (see the dual section above) — it scores the same mechanics bar on the referee *and* checks the narrator produces prose. The referee model faces exactly the same tool-calling requirement either way.
 
 ---
 
@@ -103,7 +107,9 @@ Fly's free allowance doesn't stretch to an **always-on** machine (this deploy di
    ```
    Or find the URL with `fly status`. Enter the PIN you set in step 4.
 
-**Redeploys** (`fly deploy` again after a code change) reuse the same volume — saves persist. **Rolling back to Claude** is just `fly secrets unset` isn't even needed; set `DND_DM_BACKEND=claude` in `fly.toml`'s `[env]` (note: the Claude path needs a Claude Code login, which doesn't exist inside a headless container today — this rollback is really "redeploy locally," not a cloud option; see the PRD's rollback note).
+**Redeploys** (`fly deploy` again after a code change) reuse the same volume — saves persist.
+
+**Rolling back to Claude is not a cloud option.** Setting `DND_DM_BACKEND=claude` in `fly.toml`'s `[env]` selects the Agent SDK backend, but that backend authenticates through a Claude Code login, and there is no way to complete an interactive login inside a headless container. So the real rollback is "run it locally again" (`npm run serve` on your laptop, where you *are* logged in) — not a redeploy. Switching **between** `openai` and `dual` in the cloud is fine and instant; only `claude` is off the table. See the P1 PRD's rollback note.
 
 ---
 
@@ -138,13 +144,15 @@ Oracle's Always Free tier includes an ARM (Ampere A1) VM that's genuinely free w
    HOST=0.0.0.0
    GAME_PIN=<a-long-random-string-you-choose>
    SAVES_DIR=/home/ubuntu/dnd-ai-saves
-   DND_DM_BACKEND=openai
+   DND_DM_BACKEND=dual
    DND_OPENAI_BASE_URL=https://openrouter.ai/api/v1
-   DND_OPENAI_MODEL=meta-llama/llama-3.1-70b-instruct
+   DND_OPENAI_MODEL=meta-llama/llama-3.3-70b-instruct
+   DND_OPENAI_NARRATOR_MODEL=nousresearch/hermes-3-llama-3.1-70b
    OPENROUTER_API_KEY=sk-...
    EOF
    mkdir -p /home/ubuntu/dnd-ai-saves
    ```
+   For the single-model path instead, set `DND_DM_BACKEND=openai` and drop `DND_OPENAI_NARRATOR_MODEL` — one model then handles both mechanics and prose.
 
 6. **Run under a process manager** so it survives reboots/crashes. `pm2` is the simplest option and can load a `.env` file directly:
    ```
@@ -179,10 +187,13 @@ Oracle's Always Free tier includes an ARM (Ampere A1) VM that's genuinely free w
 
 ## Security notes (read before sharing the URL)
 
-- **The PIN is the only gate.** This deploy has no accounts, no OAuth — once the URL is public, `GAME_PIN` is the entire barrier between "just my friends" and "anyone who finds the link." Treat it like a password:
+- **There are two auth modes, and the server picks automatically.** `hasPlayers(savesRoot)` decides: with an empty player registry it's the shared `GAME_PIN`; register even one player (`scripts/admin/players.ts add "<name>"`) and it switches to **per-player access codes** and `GAME_PIN` is ignored entirely. No restart needed — the registry is read per request.
+  - **Prefer access codes for anything public.** Each is 96 bits of `crypto.randomBytes`, stored only as a SHA-256 digest, revocable one player at a time (`players.ts revoke <id>`), and it gives each player their own save directory so campaigns aren't visible to each other. A shared PIN gives every holder the same access to every save.
+  - Recommended first run on a fresh host: deploy with a `GAME_PIN` set, confirm it loads, then add your players and hand out their codes. Migrate any pre-existing campaigns into a player's directory with `scripts/admin/migrate-to-players.ts --owner <id>` (dry-run by default).
+- **If you stay on the shared PIN**, it is the entire barrier between "just my friends" and "anyone who finds the link." Treat it like a password:
   - Use **more than 6 digits** for a public deploy (the local-dev default is 6 digits, fine on a LAN; a public host should use a longer, less guessable value — `fly secrets set GAME_PIN=...` / the `.env` above both accept any string, not just digits).
   - **Never index or share the URL publicly** (no README badges, no public chat links) — treat the combination of "URL known" + "PIN known" as the actual access control.
-- **The IP rate-limiter is already built in** (`src/web/server.ts`'s `PinRateLimiter` — 5 consecutive wrong-PIN attempts from one IP locks that IP out for 60s) and applies automatically to any deploy; it's not something you need to configure.
+- **The IP rate-limiter is already built in** (`src/web/server.ts`'s `PinRateLimiter` — 5 consecutive failed attempts from one IP locks that IP out for 60s) and applies automatically to any deploy, in **both** auth modes; it's not something you need to configure.
 - **Never commit `.env`, `settings.json` with a real key, or any secret value** — `.gitignore` already excludes `.env`/`.env.*` and `settings.json`; the whole point of this deploy is that the server needs neither file at all (env vars + `fly secrets` / host env cover everything).
 - **HTTPS**: Fly's `fly.toml` sets `force_https = true` and Fly provisions TLS automatically. On the Oracle path, put Caddy/nginx + a real cert (Caddy above does this automatically) in front rather than serving plain HTTP to a phone over the public internet.
 - **Endpoint privacy/ToS**: whichever OpenAI-compatible endpoint you point `DND_OPENAI_BASE_URL` at may log or train on submitted data (uncensored/free-tier providers vary widely) — that's a provider choice, not something this app controls; self-hosting the model is the only way to get full control if that matters to you.

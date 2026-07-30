@@ -13,8 +13,13 @@
 #   GAME_PIN          -- SECRET. Fixed PIN; unset -> a fresh random one is
 #                        generated every restart (fine on a laptop, useless
 #                        in the cloud where nobody's watching the console).
-#   DND_DM_BACKEND    -- 'claude' | 'openai'
+#   DND_DM_BACKEND    -- 'claude' | 'openai' | 'dual'. Note 'claude' needs a
+#                        Claude Code login, which a headless container has no
+#                        way to complete -- so a cloud deploy runs 'openai' or
+#                        'dual' in practice.
 #   DND_OPENAI_BASE_URL, DND_OPENAI_MODEL, DND_OPENAI_API_KEY_ENV
+#   DND_OPENAI_NARRATOR_MODEL -- 'dual' only: the prose model, alongside
+#                        DND_OPENAI_MODEL as the mechanics referee.
 #   OPENROUTER_API_KEY (or whatever DND_OPENAI_API_KEY_ENV names) -- SECRET.
 FROM node:20-slim
 
