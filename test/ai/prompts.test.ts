@@ -266,3 +266,58 @@ describe('suggested-actions trailer contract', () => {
     expect(wire).toContain('[[SUGGEST:');
   });
 });
+
+/**
+ * Each assertion here corresponds to a defect seen in a live 10-turn playtest
+ * on free models -- these are the rules that keep weak referees/narrators
+ * mechanically honest, so a refactor that quietly drops one should fail.
+ */
+describe('playtest-driven mechanics guardrails', () => {
+  const toolOwners = [
+    ['dmSystemPrompt', dmSystemPrompt('PG-13')],
+    ['refereeSystemPrompt', refereeSystemPrompt('PG-13')],
+  ] as const;
+
+  for (const [name, prompt] of toolOwners) {
+    it(name + ' demands damage be applied in the same turn it is rolled', () => {
+      expect(prompt).toContain('apply_damage');
+      expect(prompt).toMatch(/same turn|NOW, in this same turn|not next turn/i);
+    });
+
+    it(name + ' demands XP and quests actually get recorded', () => {
+      expect(prompt).toContain('award_xp');
+      expect(prompt).toContain('upsert_quest');
+    });
+
+    it(name + ' forbids rolling for trivial actions', () => {
+      expect(prompt).toMatch(/cannot interestingly fail|Do NOT call roll_dice/i);
+      expect(prompt).toMatch(/unlocked door/i);
+    });
+
+    it(name + " keeps an enemy's own roll off the player's dice tray", () => {
+      expect(prompt).toMatch(/roller:.dm./);
+      expect(prompt).toMatch(/never roller:.player.|Never hand the player a die/i);
+    });
+  }
+
+  it('the narrator is forbidden from escalating the hero past their Condition', () => {
+    const prompt = narratorSystemPrompt('PG-13');
+    expect(prompt).toMatch(/NEVER ESCALATE/i);
+    expect(prompt).toMatch(/collaps|black(ing)? out|dying/i);
+    expect(prompt).toMatch(/MISSED/);
+  });
+
+  it('suggestions may not reference items the hero lacks', () => {
+    for (const prompt of [dmSystemPrompt('PG-13'), narratorSystemPrompt('PG-13')]) {
+      expect(prompt).toMatch(/do not have|not have|carrying/i);
+    }
+  });
+
+  it('withMechanicsReminder repeats the checklist, since small models obey the last message', () => {
+    const wire = withMechanicsReminder('I swing at the bandit.', makeState());
+    expect(wire).toContain('apply_damage');
+    expect(wire).toContain('award_xp');
+    expect(wire).toContain('upsert_quest');
+    expect(wire).toMatch(/roller:.dm./);
+  });
+});
