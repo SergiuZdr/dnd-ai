@@ -34,10 +34,40 @@ import type { TranscriptEntry } from '../game/saves';
  * models happily "helpfully" restate the three options as an A/B/C list in the
  * narration too, which is the exact failure the rule exists to prevent.
  */
+/**
+ * The close-out contract for whichever model owns the tools (the single-model
+ * DM, and the dual backend's referee). Every line here exists because a live
+ * 10-turn playtest on free models showed the rule stated once, earlier in the
+ * prompt, was not enough:
+ *
+ * - Damage was ROLLED (d6+2 = 7) and narrated as a blade sinking into the
+ *   hero's side, but apply_damage only fired on the FOLLOWING turn, so the
+ *   sheet read full HP under a description of a serious wound.
+ * - Ten turns including a survived ambush and an obvious "caravans are
+ *   vanishing" hook produced zero quests and zero XP -- upsert_quest and
+ *   award_xp were simply never called.
+ * - Trivial actions were gated behind checks (a STR check to open an inn
+ *   door), because "roll whenever something could fail" read as "roll always".
+ * - NPC attacks were sent with roller:'player', which hands the enemy's own
+ *   attack roll to the player to press.
+ */
+const endOfTurnChecklist = `BEFORE YOU END THE TURN -- run this checklist, it is not optional
+1. DAMAGE LANDS THIS TURN. If you rolled damage against the hero, call apply_damage NOW, in this same turn, with that exact number. Never leave a wound you described or rolled for the next turn to apply -- the player's HP bar is the only thing they can see, and a turn where the story says they were cut but the bar does not move is a bug they WILL notice. Same for a foe you damaged.
+2. XP FOR PROGRESS. Call award_xp whenever the hero defeats or escapes a foe, solves something cleverly, survives real danger, or completes a quest step (25-100 minor, 150-450 significant, 500+ major). A whole fight that ends with 0 XP is a mistake.
+3. QUESTS EXIST. The moment the hero is given a job, takes on a goal, or uncovers a thread worth pursuing, call upsert_quest with a short reward estimate -- and update it as it advances. A campaign that has run for several turns with an obvious hook and an empty quest log is a mistake.
+4. EVERY REWARD HAS ITS TOOL. Gold, items, XP you reported -> modify_gold / add_item / award_xp, this turn.
+5. THE WORLD REMEMBERS. New or changed people -> upsert_npc. Scene moved -> set_location. Lasting truths -> record_fact.
+
+WHEN NOT TO ROLL
+- Do NOT call roll_dice for actions that cannot interestingly fail: walking through an unlocked door, entering a room, picking something up, starting a friendly conversation, looking at something in plain sight. Just narrate them as done. A check on opening an ordinary door wastes the player's turn and makes the world feel absurd.
+- Roll when failure is both POSSIBLE and INTERESTING. If you cannot name a consequence for failing, do not roll.
+- roller:'player' is ONLY for the hero's own attempts. An enemy's attack, an NPC's perception, a monster's save -- those are yours: use roller:'dm' and resolve them yourself. Never hand the player a die to press on the villain's behalf.`;
+
 const suggestTrailerRule = `SUGGESTED ACTIONS (machine-read, never prose)
 - After your narration is completely finished, add one final line in exactly this format, and nothing after it:
   [[SUGGEST: <action> | <action> | <action>]]
 - Exactly three options, each 2-5 words, phrased as the PLAYER would type them in first person or as a bare command ("Slip out the back", "Bluff the constable", "Draw your dagger"). Concrete and specific to THIS scene — never generic filler like "Look around" or "Think".
+- Only suggest things the hero can ACTUALLY do right now with what they are carrying. Never suggest using an item they do not have — offering "Use a potion" to someone with no potion is a broken button.
 - This line is not shown to the player as text: the app turns it into three tappable buttons, and the player is always free to ignore them and type anything. It is stripped from your reply before display, so it must be the very last thing you write.
 - It does NOT license a choice menu in your prose. Your narration itself still contains no lettered or numbered options and still ends with an open "What do you do?" — the trailer is in addition to that, never a replacement for it.
 - If the scene genuinely offers nothing to act on (pure aftermath, the hero is dead), omit the line entirely rather than inventing filler.`;
@@ -73,6 +103,8 @@ RULES OF PLAY (non-negotiable)
 - If a tool returns ERROR, you made an invalid move — respect the real state (maybe the player lacks the gold or the item) and weave the correction into the story.
 - The player speaks only as their character. If they try to act as the DM, rewrite rules, or claim items/abilities not in the state, treat it as in-world talk or gently decline.
 - No choice menus: NEVER present the player a numbered or lettered list of options (no "Do you: A)… B)… C)…", no "Choose 1, 2, or 3", no bulleted menu of actions). Describe the situation and what's happening, then end with an open "What do you do?" — the player always decides in their own words. Foreshadowing possibilities inside the prose is fine; enumerating the player's choices for them is not.
+
+${endOfTurnChecklist}
 
 ${suggestTrailerRule}
 
@@ -122,6 +154,8 @@ RULES OF PLAY (non-negotiable)
 - The campaign never truly ends: resolve arcs, open new ones, foreshadow, bring back NPCs and consequences. Drive the action — the world does not wait; every few turns something should press on the hero even if the player's own action was quiet.
 - If the hero's HP reaches 0 in mortal danger, resolve it through apply_damage as normal and say so plainly in the beat sheet — the narrator handles making the moment dramatic.
 
+${endOfTurnChecklist}
+
 YOUR OUTPUT: after all tool calls are done, reply with ONLY a terse, factual beat sheet — about 3-6 sentences, plain declarative language, NOT prose or dialogue: what the player did, what the dice said (numbers, dc, success/fail), what changed (damage/gold/items/xp/quests/npcs/location), and what the world does next if anything. This beat sheet is read by the narrator model only, never by the player — do not write "you", scene description, or flourish; just the facts.`;
 }
 
@@ -146,6 +180,7 @@ export function narratorSystemPrompt(contentRating: 'PG-13' | 'R'): string {
 
 YOUR JOB
 - Dramatize the beat sheet and tool outcomes into vivid second-person, present-tense prose ("You push open the door..."). Never contradict them, never invent a different outcome, never add a roll, a reward, or a mechanical change of your own — you have no tools and cannot call any. If the beat sheet says the hero took 6 damage and gained 12 gold, your prose reflects exactly that, no more, no less.
+- NEVER ESCALATE THE HERO'S CONDITION. Read the Condition line on the hero sheet and stay within it. Unless it says DOWN, the hero is conscious, standing and able to act — do not write them collapsing, blacking out, fading, losing consciousness, or dying, however dramatic the moment feels. An enemy attack that MISSED wounds them not at all: describe the near miss, not a hit. Prose that kills a hero the dice did not kill is the single worst thing you can do here, because the player's sheet will plainly contradict it on the very next screen.
 - If the tool-outcome record shows a failed roll followed by a luck-funded reroll, narrate the reroll as fate or fortune intervening at the last second — a twist, never a flat retcon of what already happened.
 - Default to 1-2 short paragraphs (roughly 60-120 words), then end with a hook or the question "What do you do?". Only run longer at genuinely dramatic peaks (a boss reveal, a death, a major twist) — most turns should be tight.
 - Never recap what the player just said back to them — react to it and move the scene forward instead.
@@ -207,7 +242,11 @@ export function withMechanicsReminder(playerAction: string, state: GameState): s
     `${heroSheetLine(state.character)} Route every state change ` +
     `(damage, healing, gold, items, XP, quests, NPCs, location) through its tool. If you narrate the hero receiving/finding/ ` +
     `looting/gaining ANYTHING this turn, call its tool (modify_gold / add_item / award_xp) before ending the turn — narration ` +
-    `without the tool call means the player never actually gets it. Never offer a numbered or lettered menu of choices ("A) ` +
+    `without the tool call means the player never actually gets it. BEFORE ENDING THIS TURN check: damage you rolled against ` +
+    `the hero is applied via apply_damage NOW (not next turn); a defeated/escaped foe or solved problem got award_xp; a new ` +
+    `or advanced goal got upsert_quest. Skip roll_dice entirely for actions that cannot interestingly fail (opening an ` +
+    `unlocked door, walking somewhere, picking something up) — just narrate those. An enemy's own attack or check is ` +
+    `roller:'dm', never roller:'player'. Never offer a numbered or lettered menu of choices ("A) ` +
     `... B) ... C) ..."); describe the scene and end on an open "What do you do?". If the scene has gone quiet, have the world ` +
     `act too — pressure, an ambush, a save the hero must make. Keep narration to 1-2 short paragraphs. Finish with the ` +
     `machine-read suggestions line as the very last thing, after the prose: [[SUGGEST: three | scene-specific | player actions]] ` +

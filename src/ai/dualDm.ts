@@ -149,6 +149,22 @@ function stripMechanicsReminder(text: string): string {
  * numbers. Handing over the post-turn truth makes the contradiction
  * impossible to miss.
  */
+/**
+ * Plain-language reading of the hero's HP, because a bare "HP 5/12" was not
+ * enough: handed exactly that, the narrator wrote the hero's heartbeat
+ * "growing slower and weaker" fading into "hollow silence" -- a death scene --
+ * on a turn where the enemy's attack had actually MISSED. Spelling the
+ * condition out (and stating outright that they are conscious) removes the
+ * inference the model was getting wrong.
+ */
+export function describeCondition(hp: number, maxHp: number): string {
+  if (hp <= 0) return 'DOWN -- at 0 HP, mortally wounded; this is the only state in which you may narrate collapse or death';
+  const ratio = maxHp > 0 ? hp / maxHp : 1;
+  const severity =
+    ratio >= 1 ? 'unhurt' : ratio > 0.6 ? 'lightly hurt' : ratio > 0.3 ? 'wounded' : 'badly wounded';
+  return `${severity} but CONSCIOUS, standing and able to act -- do NOT narrate collapse, blackout, or dying`;
+}
+
 export function formatHeroGroundTruth(state: GameState): string {
   const c = state.character;
   const items = c.inventory.length
@@ -156,6 +172,7 @@ export function formatHeroGroundTruth(state: GameState): string {
     : '(nothing)';
   return [
     `HP ${c.hp}/${c.maxHp} | AC ${c.ac} | gold ${c.gold} | XP ${c.xp} | luck ${c.luck} | level ${c.level}`,
+    `Condition: ${describeCondition(c.hp, c.maxHp)}`,
     `Carrying: ${items}`,
     `Location: ${state.world.location}`,
   ].join('\n');
@@ -201,7 +218,12 @@ ${beatSheet || '(the referee reported nothing unusual this turn)'}
 [TOOL OUTCOMES THIS TURN]
 ${formatToolOutcomes(outcomes)}
 ${groundTruth}${nothingHappened}
-Write the narration now, in your voice, ending with "What do you do?" unless the scene has just ended in death. Then, on one final line after the prose, add the machine-read suggestions trailer: [[SUGGEST: three | short | scene-specific actions]] (2-5 words each, phrased as the player would type them). It is stripped before display and shown as buttons, so it must come last and must never appear inside your prose.`;
+[STAY INSIDE THE FACTS]
+- Narrate ONLY the harm and gains listed above. If no damage was applied to the hero this turn, they take no new wound -- an enemy attack that missed leaves them untouched.
+- Never escalate the hero's condition past the Condition line. Unless it says DOWN, they are conscious, on their feet, and can act next turn: no blacking out, no fading to silence, no "life slipping away".
+- Never invent numbers, loot, XP, or a quest the facts above do not state.
+
+Write the narration now, in your voice, ending with "What do you do?" unless the Condition line says DOWN. Then, on one final line after the prose, add the machine-read suggestions trailer: [[SUGGEST: three | short | scene-specific actions]] (2-5 words each, phrased as the player would type them). Every suggestion must be something the hero can actually do right now -- never suggest using an item that is not in the Carrying list above. It is stripped before display and shown as buttons, so it must come last and must never appear inside your prose.`;
 }
 
 export interface DualModelDmSessionOptions {

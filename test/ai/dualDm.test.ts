@@ -15,7 +15,13 @@ import { Engine } from '../../src/game/engine';
 import type { EngineResult } from '../../src/game/engine';
 import type { GameState } from '../../src/game/state';
 import { createDmTools } from '../../src/ai/tools';
-import { DualModelDmSession, formatToolOutcomes, buildNarratorUserPrompt } from '../../src/ai/dualDm';
+import {
+  DualModelDmSession,
+  formatToolOutcomes,
+  buildNarratorUserPrompt,
+  describeCondition,
+  formatHeroGroundTruth,
+} from '../../src/ai/dualDm';
 import type { ToolOutcomeRecord } from '../../src/ai/dualDm';
 import type { DmError, DmSessionCallbacks, DmSessionConfig } from '../../src/ai/dm';
 import type { OpenAiStreamChunk } from '../../src/ai/openaiStream';
@@ -561,5 +567,72 @@ describe('buildNarratorUserPrompt', () => {
       expect(prompt).not.toContain('GROUND TRUTH');
       expect(prompt).toContain('Nothing happens.');
     });
+  });
+});
+
+/**
+ * Live-playtest defect: handed a bare "HP 5/12", the narrator wrote the
+ * hero fading into "hollow silence" -- a death scene -- on a turn where the
+ * enemy attack had MISSED. The condition line states the reading outright so
+ * the model has nothing left to infer wrongly.
+ */
+describe('describeCondition', () => {
+  it('says CONSCIOUS and forbids collapse for any hp above 0', () => {
+    for (const hp of [1, 2, 5, 8, 11, 12]) {
+      const text = describeCondition(hp, 12);
+      expect(text, 'hp=' + hp).toMatch(/CONSCIOUS/);
+      expect(text, 'hp=' + hp).toMatch(/do NOT narrate collapse/i);
+      expect(text, 'hp=' + hp).not.toMatch(/^DOWN/);
+    }
+  });
+
+  it('only reports DOWN at 0 hp or below, and that is the one state allowing death', () => {
+    for (const hp of [0, -1, -7]) {
+      const text = describeCondition(hp, 12);
+      expect(text, 'hp=' + hp).toMatch(/^DOWN/);
+      expect(text, 'hp=' + hp).toMatch(/death/i);
+    }
+  });
+
+  it('scales the wording with how hurt they are', () => {
+    expect(describeCondition(12, 12)).toMatch(/unhurt/);
+    expect(describeCondition(10, 12)).toMatch(/lightly hurt/);
+    expect(describeCondition(5, 12)).toMatch(/wounded/);
+    expect(describeCondition(2, 12)).toMatch(/badly wounded/);
+  });
+
+  it('does not divide by zero on a degenerate maxHp', () => {
+    expect(() => describeCondition(0, 0)).not.toThrow();
+    expect(describeCondition(1, 0)).toMatch(/CONSCIOUS/);
+  });
+});
+
+describe('narrator ground truth + per-turn constraints', () => {
+  function heroState(hp: number): GameState {
+    return {
+      campaign: { slug: 's', name: 'S', createdAt: 't', updatedAt: 't', contentRating: 'PG-13' },
+      character: {
+        name: 'Bran', className: 'Ranger', race: 'Dwarf', background: '', backgroundFact: '',
+        level: 1, xp: 0, hp, maxHp: 12, ac: 16,
+        stats: { str: 15, dex: 15, con: 15, int: 12, wis: 10, cha: 8 },
+        gold: 15, inventory: [{ name: 'Shortsword', qty: 1 }], luck: 0,
+      },
+      world: { theme: 't', location: 'Salthollow', npcs: [], quests: [], facts: [] },
+      chronicle: { storySoFar: '', chapters: [], lastSummarizedIndex: 0 },
+    };
+  }
+
+  it('puts the condition line in the hero sheet the narrator reads', () => {
+    const sheet = formatHeroGroundTruth(heroState(5));
+    expect(sheet).toContain('HP 5/12');
+    expect(sheet).toMatch(/Condition: .*CONSCIOUS/);
+    expect(sheet).toContain('Shortsword x1');
+  });
+
+  it('tells the narrator not to escalate, and to keep suggestions to carried items', () => {
+    const prompt = buildNarratorUserPrompt('I retreat.', 'The bandit attacked and missed.', [], heroState(5));
+    expect(prompt).toMatch(/STAY INSIDE THE FACTS/);
+    expect(prompt).toMatch(/missed leaves them untouched/i);
+    expect(prompt).toMatch(/never suggest using an item that is not in the Carrying list/i);
   });
 });
