@@ -98,7 +98,7 @@ describe('DualModelDmSession', () => {
     );
   }
 
-  function makeSession(hooks?: Parameters<typeof createDmTools>[1]) {
+  function makeSession(hooks?: Parameters<typeof createDmTools>[1], sessionOpts?: { stallTimeoutMs?: number }) {
     const engine = new Engine(makeState());
     const { server, allowedTools, tools } = createDmTools(engine, hooks);
     const config: DmSessionConfig = {
@@ -117,7 +117,7 @@ describe('DualModelDmSession', () => {
       onError: vi.fn(),
       onRawMessage: vi.fn(),
     };
-    const session = new DualModelDmSession(config, callbacks, { settingsBaseDir: settingsDir });
+    const session = new DualModelDmSession(config, callbacks, { settingsBaseDir: settingsDir, ...sessionOpts });
     return { engine, session, callbacks };
   }
 
@@ -473,6 +473,108 @@ describe('DualModelDmSession', () => {
     expect(refereeBody.model).toBe('referee-model');
     expect(narratorBody.model).toBe('referee-model'); // fell back to the referee's model
   });
+
+  // Both of these are live-playtest failures, not hypotheticals: on one turn
+  // the narrator returned an empty stream and killed the turn outright, and on
+  // another the provider opened a stream and never sent a byte, leaving the
+  // game "thinking" for five minutes with only STOP as a way out.
+  describe('surviving a flaky free-tier provider', () => {
+    const beatSheetOnly = () =>
+      sseResponse([{ choices: [{ delta: { content: 'Beat sheet.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]);
+    /** A stream that yields no content at all -- the empty narration a free model intermittently returns. */
+    const emptyStream = () => sseResponse([{ choices: [{ delta: {}, finish_reason: 'stop' }] }]);
+
+    it('retries an empty narration once and delivers the second attempt', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(beatSheetOnly())
+        .mockResolvedValueOnce(beatSheetOnly()) // the zero-tool nudge
+        .mockResolvedValueOnce(emptyStream()) // narrator returns nothing
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'The shutters bang open.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { session, callbacks } = makeSession();
+      session.start();
+      session.send('knock on the door');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect((callbacks.onTurnComplete as any).mock.calls[0][0].text).toBe('The shutters bang open.');
+      expect(callbacks.onError).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    });
+
+    it('gives up honestly when the narration is empty twice', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(beatSheetOnly())
+        .mockResolvedValueOnce(beatSheetOnly())
+        .mockResolvedValueOnce(emptyStream())
+        .mockResolvedValueOnce(emptyStream());
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { session, callbacks } = makeSession();
+      session.start();
+      session.send('knock on the door');
+      await waitFor(() => (callbacks.onError as any).mock.calls.length > 0);
+
+      expect((callbacks.onError as any).mock.calls[0][0].friendly).toMatch(/returned nothing/i);
+      expect(callbacks.onTurnComplete).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(4); // one retry, not an endless loop
+    });
+
+    it('breaks a stream that opens and then goes silent, instead of hanging the turn forever', async () => {
+      // Never enqueues anything; errors only when the request is aborted, the
+      // same way a real fetch body does.
+      const stallingResponse = (signal?: AbortSignal | null) =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')));
+            },
+          }),
+          { status: 200 },
+        );
+      const fetchMock = vi.fn((_url: string, init: RequestInit) => Promise.resolve(stallingResponse(init?.signal)));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { session, callbacks } = makeSession(undefined, { stallTimeoutMs: 40 });
+      session.start();
+      session.send('walk into the cave');
+      await waitFor(() => (callbacks.onError as any).mock.calls.length > 0);
+
+      const err = (callbacks.onError as any).mock.calls[0][0];
+      expect(err.friendly).toMatch(/went quiet mid-turn/i);
+      expect(err.friendly).toMatch(/referee/i);
+      expect(session.busy).toBe(false); // the turn ended -- the player is not stuck
+    });
+
+    it('stays silent when the player interrupts, rather than reporting a stall', async () => {
+      const fetchMock = vi.fn((_url: string, init: RequestInit) =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                init?.signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')));
+              },
+            }),
+            { status: 200 },
+          ),
+        ),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      // A generous timeout, so nothing but the explicit interrupt can end this turn.
+      const { session, callbacks } = makeSession(undefined, { stallTimeoutMs: 60_000 });
+      session.start();
+      session.send('wait here');
+      await waitFor(() => session.busy);
+      await session.interrupt();
+
+      expect(callbacks.onError).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('formatToolOutcomes', () => {
@@ -483,11 +585,11 @@ describe('formatToolOutcomes', () => {
   it('renders one line per record, marking failures distinctly from successes', () => {
     const records: ToolOutcomeRecord[] = [
       { tool: 'roll_dice', args: { expr: 'd20+3' }, ok: true, resultText: '🎲 d20+3 -> 18 vs DC 13 -- success' },
-      { tool: 'modify_gold', args: { delta: -1000 }, ok: false, resultText: 'ERROR: not enough gold' },
+      { tool: 'spend_gold', args: { amount: 1000 }, ok: false, resultText: 'ERROR: not enough gold' },
     ];
     const text = formatToolOutcomes(records);
     expect(text).toContain('- roll_dice: 🎲 d20+3 -> 18 vs DC 13 -- success');
-    expect(text).toContain('- modify_gold: FAILED -- ERROR: not enough gold');
+    expect(text).toContain('- spend_gold: FAILED -- ERROR: not enough gold');
   });
 });
 

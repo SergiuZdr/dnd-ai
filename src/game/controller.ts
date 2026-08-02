@@ -92,7 +92,7 @@ export interface ControllerCallbacks {
   onDiceRoll: (message: string) => void;
   onToolActivity?: (toolName: string) => void;
   /**
-   * Fires once per successful gain/loss tool call (modify_gold / award_xp /
+   * Fires once per successful gain/loss tool call (award_gold / spend_gold / award_xp / defeat_foe /
    * add_item / remove_item) with a structured delta -- see LedgerDelta.
    * Optional so an implementer that has no use for it keeps compiling
    * unchanged: GameBridge implements it (the web client's "YOU GAINED" toast),

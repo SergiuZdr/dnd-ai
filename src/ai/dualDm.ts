@@ -76,6 +76,24 @@ const DEFAULT_MAX_TURNS_PER_MESSAGE = 12;
 // sitting.
 const MAX_NARRATOR_HISTORY_MESSAGES = 12;
 
+/**
+ * How long a stream may produce NOTHING before the turn is declared dead (see
+ * the stall watchdog on DualModelDmSession). Generous on purpose: free-tier
+ * models routinely take 30-60s to emit their first token, and killing a turn
+ * that was merely thinking would be a worse bug than the hang it prevents.
+ * Silence past this is not slowness, it is a stream that has stopped.
+ */
+export const STREAM_STALL_TIMEOUT_MS = 90_000;
+
+/**
+ * The narrator returning an empty stream is a known, intermittent free-model
+ * failure (it killed a turn outright in a live playtest, and had already forced
+ * one model swap). It costs one cheap request to ask again, and unlike the
+ * referee phase there is no tool state to replay -- so the turn is retried once
+ * before the player is told it failed.
+ */
+const NARRATOR_EMPTY_RETRIES = 1;
+
 type ToolMessageCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
 
 type RefereeMessage =
@@ -221,7 +239,8 @@ ${groundTruth}${nothingHappened}
 [STAY INSIDE THE FACTS]
 - Narrate ONLY the harm and gains listed above. If no damage was applied to the hero this turn, they take no new wound -- an enemy attack that missed leaves them untouched.
 - Never escalate the hero's condition past the Condition line. Unless it says DOWN, they are conscious, on their feet, and can act next turn: no blacking out, no fading to silence, no "life slipping away".
-- Never invent numbers, loot, XP, or a quest the facts above do not state.
+- NO REWARD THAT IS NOT LISTED ABOVE. If no gold was awarded this turn, the hero finds no coin -- do not write a purse, a pouch, "a handful of silver", or any amount of money. If no item was added, they pick up nothing: no dagger, no map, no letter, no key. A searched body with nothing in the tool outcomes came up empty, and you say so. Naming loot the ledger does not have is the worst mistake you can make here, because the player's sidebar contradicts it instantly.
+- OBEY EVERY ROLL LISTED ABOVE. A roll marked failure IS a failure: the attempt does not quietly succeed later in your paragraph. Never narrate both a success and a failure of the same attempt.
 
 Write the narration now, in your voice, ending with "What do you do?" unless the Condition line says DOWN. Then, on one final line after the prose, add the machine-read suggestions trailer: [[SUGGEST: three | short | scene-specific actions]] (2-5 words each, phrased as the player would type them). Every suggestion must be something the hero can actually do right now -- never suggest using an item that is not in the Carrying list above. It is stripped before display and shown as buttons, so it must come last and must never appear inside your prose.`;
 }
@@ -229,6 +248,8 @@ Write the narration now, in your voice, ending with "What do you do?" unless the
 export interface DualModelDmSessionOptions {
   /** Test seam: forwarded to loadSettings() instead of the real process.cwd() settings.json -- see OpenAiDmSessionOptions for the identical rationale. */
   settingsBaseDir?: string;
+  /** Test seam: overrides STREAM_STALL_TIMEOUT_MS so a test can prove the stall watchdog in milliseconds instead of ninety seconds. */
+  stallTimeoutMs?: number;
 }
 
 export class DualModelDmSession {
@@ -258,6 +279,11 @@ export class DualModelDmSession {
   private runTurnPromise?: Promise<void>;
   private closed = false;
   private _busy = false;
+
+  /** Set by the stall watchdog just before it aborts, so the abort handlers can tell a hung provider apart from the player pressing STOP and report the first while staying silent about the second. */
+  private stalled = false;
+  private stallTimer?: ReturnType<typeof setTimeout>;
+  private stallPhase?: 'referee' | 'narrator';
 
   constructor(config: DmSessionConfig, callbacks: DmSessionCallbacks, opts?: DualModelDmSessionOptions) {
     this.config = config;
@@ -348,6 +374,71 @@ export class DualModelDmSession {
     }
   }
 
+  // -- Stall watchdog -------------------------------------------------------
+  //
+  // A live turn hung for over five minutes with no output and no way back
+  // except the STOP button: a free-tier provider accepted the request, opened
+  // the stream and then simply never sent a byte, leaving reader.read() awaiting
+  // a chunk that was never coming. A total-duration cap would be the wrong
+  // instrument -- turns on these models legitimately run two to three minutes
+  // and complete fine -- so this watches for SILENCE instead: the clock resets
+  // on every chunk that arrives, and only a genuinely dead stream trips it.
+  //
+  // Deliberately scoped to the network read alone (armed before the POST,
+  // cleared the moment the stream ends). Tool execution happens outside that
+  // window, which matters because an interactive player roll parks the turn
+  // until the player physically clicks ROLL -- a wait that is not a stall and
+  // must never be killed.
+
+  private get stallTimeoutMs(): number {
+    return this.opts?.stallTimeoutMs ?? STREAM_STALL_TIMEOUT_MS;
+  }
+
+  private startStallTimer(): void {
+    this.stallTimer = setTimeout(() => {
+      this.stalled = true;
+      this.abortController?.abort();
+    }, this.stallTimeoutMs);
+  }
+
+  private armStallWatchdog(phase: 'referee' | 'narrator'): void {
+    this.clearStallWatchdog();
+    this.stallPhase = phase;
+    this.startStallTimer();
+  }
+
+  /** Called on every chunk off the wire: progress means the stream is alive, so start the silence clock over. */
+  private touchStallWatchdog(): void {
+    if (this.stallTimer === undefined) return;
+    clearTimeout(this.stallTimer);
+    this.startStallTimer();
+  }
+
+  private clearStallWatchdog(): void {
+    if (this.stallTimer !== undefined) {
+      clearTimeout(this.stallTimer);
+      this.stallTimer = undefined;
+    }
+  }
+
+  /**
+   * Distinguishes the two ways a turn gets aborted. The player pressing STOP
+   * stays silent (they know what they did); the watchdog firing must say so,
+   * or the player is left staring at a turn that ended for no visible reason.
+   */
+  private reportStallIfAny(): void {
+    if (!this.stalled) return;
+    this.stalled = false;
+    const phase = this.stallPhase ?? 'referee';
+    this.callbacks.onError?.(
+      new DmError(
+        'unknown',
+        `${phase} stream produced nothing for ${this.stallTimeoutMs}ms`,
+        `The Dungeon Master (${phase}) went quiet mid-turn and stopped responding — the model or provider stalled. Nothing was lost; try that again.`,
+      ),
+    );
+  }
+
   private async runTurn(): Promise<void> {
     try {
       if (this.closed) return;
@@ -355,6 +446,8 @@ export class DualModelDmSession {
       if (!referee || this.closed) return; // error/abort already reported by the referee phase itself
       await this.runNarratorPhase(referee);
     } finally {
+      this.clearStallWatchdog();
+      this.stalled = false;
       this._busy = false;
       this.abortController = undefined;
     }
@@ -374,21 +467,29 @@ export class DualModelDmSession {
       const abortController = new AbortController();
       this.abortController = abortController;
 
+      this.armStallWatchdog('referee');
+
       let response: Response;
       try {
         response = await this.postRefereeCompletion(abortController.signal);
       } catch (err) {
-        if (isAbortError(err)) return undefined;
+        this.clearStallWatchdog();
+        if (isAbortError(err)) {
+          this.reportStallIfAny();
+          return undefined;
+        }
         this.callbacks.onError?.(classifyNetworkError(err));
         return undefined;
       }
 
       if (!response.ok) {
+        this.clearStallWatchdog();
         const bodyText = await safeReadText(response);
         this.callbacks.onError?.(classifyHttpError(response.status, bodyText));
         return undefined;
       }
       if (!response.body) {
+        this.clearStallWatchdog();
         this.callbacks.onError?.(
           new DmError('unknown', 'empty response body', 'The Dungeon Master (referee) returned an empty response.'),
         );
@@ -399,10 +500,17 @@ export class DualModelDmSession {
       try {
         stepResult = await this.consumeStream(response.body, { forwardDeltas: false });
       } catch (err) {
-        if (isAbortError(err)) return undefined;
+        this.clearStallWatchdog();
+        if (isAbortError(err)) {
+          this.reportStallIfAny();
+          return undefined;
+        }
         this.callbacks.onError?.(classifyNetworkError(err));
         return undefined;
       }
+      // Cleared before tool execution on purpose: an interactive player roll
+      // parks the turn here until the player clicks, and that wait is not a stall.
+      this.clearStallWatchdog();
       this.abortController = undefined;
 
       // Stream truncation (mirrors OpenAiDmSession's NFR 6.2 handling).
@@ -452,7 +560,7 @@ export class DualModelDmSession {
         this.refereeMessages.push({
           role: 'user',
           content:
-            'You ended that turn without calling a single tool. Re-read the player\'s action: if ANYTHING mechanical happened — the hero drank/used/consumed an item, healed, rested, took damage, attacked, gained or spent gold, gained or lost an item, earned XP, or moved somewhere new — call the matching tools NOW (heal, apply_damage, remove_item, add_item, modify_gold, award_xp, set_location, roll_dice...). The player\'s screen only ever shows what these tools record, so an unrecorded change simply did not happen. If the turn genuinely involved nothing mechanical, reply with your beat sheet again and call nothing.',
+            'You ended that turn without calling a single tool. Re-read the player\'s action: if ANYTHING mechanical happened — the hero drank/used/consumed an item, healed, rested, took damage, attacked, defeated a foe, took or paid gold, gained or lost an item, earned XP, or moved somewhere new — call the matching tools NOW (heal, apply_damage, defeat_foe, remove_item, add_item, award_gold, spend_gold, award_xp, set_location, roll_dice...). Gold the hero PICKS UP is award_gold; gold they PAY is spend_gold. The player\'s screen only ever shows what these tools record, so an unrecorded change simply did not happen. If the turn genuinely involved nothing mechanical, reply with your beat sheet again and call nothing.',
         });
         continue;
       }
@@ -540,48 +648,73 @@ export class DualModelDmSession {
       { role: 'user', content: userPrompt },
     ];
 
-    const abortController = new AbortController();
-    this.abortController = abortController;
+    let narration = '';
 
-    let response: Response;
-    try {
-      response = await this.postNarratorCompletion(requestMessages, abortController.signal);
-    } catch (err) {
-      if (isAbortError(err)) return;
-      this.callbacks.onError?.(classifyNetworkError(err));
-      return;
+    for (let attempt = 0; ; attempt++) {
+      const abortController = new AbortController();
+      this.abortController = abortController;
+      this.armStallWatchdog('narrator');
+
+      let response: Response;
+      try {
+        response = await this.postNarratorCompletion(requestMessages, abortController.signal);
+      } catch (err) {
+        this.clearStallWatchdog();
+        if (isAbortError(err)) {
+          this.reportStallIfAny();
+          return;
+        }
+        this.callbacks.onError?.(classifyNetworkError(err));
+        return;
+      }
+
+      if (!response.ok) {
+        this.clearStallWatchdog();
+        const bodyText = await safeReadText(response);
+        this.callbacks.onError?.(classifyHttpError(response.status, bodyText));
+        return;
+      }
+      if (!response.body) {
+        this.clearStallWatchdog();
+        this.callbacks.onError?.(
+          new DmError('unknown', 'empty response body', 'The Dungeon Master (narrator) returned an empty response.'),
+        );
+        return;
+      }
+
+      let stepResult: StepResult;
+      try {
+        stepResult = await this.consumeStream(response.body, { forwardDeltas: true });
+      } catch (err) {
+        this.clearStallWatchdog();
+        if (isAbortError(err)) {
+          this.reportStallIfAny();
+          return;
+        }
+        this.callbacks.onError?.(classifyNetworkError(err));
+        return;
+      }
+      this.clearStallWatchdog();
+      this.abortController = undefined;
+
+      // An empty narration is a dead turn for the player, so ask once more
+      // before giving up -- the referee's work is already committed and would
+      // otherwise be dramatised by nobody.
+      if (stepResult.content.length === 0) {
+        if (attempt < NARRATOR_EMPTY_RETRIES && !this.closed) {
+          this.callbacks.onSystemNote?.('(the narrator returned nothing — asking again)');
+          continue;
+        }
+        this.callbacks.onError?.(
+          new DmError('unknown', 'stream ended with no content', 'The Dungeon Master (narrator) returned nothing — please try again.'),
+        );
+        return;
+      }
+
+      narration = stepResult.content;
+      break;
     }
 
-    if (!response.ok) {
-      const bodyText = await safeReadText(response);
-      this.callbacks.onError?.(classifyHttpError(response.status, bodyText));
-      return;
-    }
-    if (!response.body) {
-      this.callbacks.onError?.(
-        new DmError('unknown', 'empty response body', 'The Dungeon Master (narrator) returned an empty response.'),
-      );
-      return;
-    }
-
-    let stepResult: StepResult;
-    try {
-      stepResult = await this.consumeStream(response.body, { forwardDeltas: true });
-    } catch (err) {
-      if (isAbortError(err)) return;
-      this.callbacks.onError?.(classifyNetworkError(err));
-      return;
-    }
-    this.abortController = undefined;
-
-    if (stepResult.finishReason === null && stepResult.content.length === 0) {
-      this.callbacks.onError?.(
-        new DmError('unknown', 'stream ended with no content', 'The Dungeon Master (narrator) returned nothing — please try again.'),
-      );
-      return;
-    }
-
-    const narration = stepResult.content;
     this.narratorHistory.push({ role: 'user', content: userPrompt }, { role: 'assistant', content: narration });
     this.trimNarratorHistory();
 
@@ -632,6 +765,7 @@ export class DualModelDmSession {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
+        this.touchStallWatchdog(); // bytes arrived -- the stream is alive, restart the silence clock
 
         const text = decoder.decode(value, { stream: true });
         const events = sse.push(text);

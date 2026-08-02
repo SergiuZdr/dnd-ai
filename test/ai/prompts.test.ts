@@ -316,8 +316,45 @@ describe('playtest-driven mechanics guardrails', () => {
   it('withMechanicsReminder repeats the checklist, since small models obey the last message', () => {
     const wire = withMechanicsReminder('I swing at the bandit.', makeState());
     expect(wire).toContain('apply_damage');
-    expect(wire).toContain('award_xp');
+    expect(wire).toContain('defeat_foe');
     expect(wire).toContain('upsert_quest');
     expect(wire).toMatch(/roller:.dm./);
+  });
+
+  // A second live playtest, after the first round of fixes landed: the referee
+  // read "I pocket the ten gold pieces" as modify_gold(-10) and left the hero
+  // poorer for looting; the narrator handed over a pouch, a dagger and a map
+  // that no tool ever recorded, on a roll it had just been told was a FAILURE;
+  // and a won fight still ended at 0 XP.
+  for (const [name, prompt] of toolOwners) {
+    it(name + ' names the gold direction in the tool, never in a sign', () => {
+      expect(prompt).toContain('award_gold');
+      expect(prompt).toContain('spend_gold');
+      expect(prompt).not.toContain('modify_gold');
+      expect(prompt).toMatch(/RICHER/);
+    });
+
+    it(name + ' routes a defeated foe through the tool that also pays the XP', () => {
+      expect(prompt).toContain('defeat_foe');
+      expect(prompt).toMatch(/XP still at 0 is a mistake|must never end without this call/i);
+    });
+
+    it(name + ' will not make the player roll to keep loot they already found', () => {
+      expect(prompt).toMatch(/PICKING THINGS UP IS NOT A CHECK/i);
+      expect(prompt).toMatch(/already found|already searched|already earned/i);
+    });
+  }
+
+  it('the narrator may not invent a reward the ledger does not have', () => {
+    const prompt = narratorSystemPrompt('PG-13');
+    expect(prompt).toMatch(/NEVER INVENT A REWARD/i);
+    expect(prompt).toMatch(/did not get it/i);
+  });
+
+  it('the narrator must let a failed roll read as a failure', () => {
+    const prompt = narratorSystemPrompt('PG-13');
+    expect(prompt).toMatch(/OBEY THE ROLL/i);
+    expect(prompt).toMatch(/FAILED check must read as a failure/i);
+    expect(prompt).toMatch(/Never describe a success and a failure of the same attempt/i);
   });
 });

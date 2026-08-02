@@ -186,18 +186,53 @@ describe('createDmTools roll_dice', () => {
 // GAINED" toast without parsing engine message strings -- see state.ts's
 // LedgerDelta and controller.ts's ControllerCallbacks.onLedgerGain.
 describe('createDmTools ledger events (LedgerDelta)', () => {
-  it('modify_gold emits { gold: delta } on success, and does not fire on a rejected delta', async () => {
+  it('award_gold emits { gold: +amount } on success, and does not fire on a rejected amount', async () => {
     const engine = new Engine(makeState());
     const onLedger = vi.fn();
     const { tools } = createDmTools(engine, { onLedger });
-    const modifyGold = findTool(tools, 'modify_gold');
+    const awardGold = findTool(tools, 'award_gold');
 
-    await modifyGold.handler({ delta: 25, reason: 'sold loot' }, undefined);
+    await awardGold.handler({ amount: 25, reason: 'sold loot' }, undefined);
     expect(onLedger).toHaveBeenCalledExactlyOnceWith({ gold: 25 });
 
     onLedger.mockClear();
-    await modifyGold.handler({ delta: -100000000, reason: 'huge' }, undefined); // exceeds the engine's magnitude cap -> ok:false
+    await awardGold.handler({ amount: 100000000, reason: 'huge' }, undefined); // exceeds the engine's magnitude cap -> ok:false
     expect(onLedger).not.toHaveBeenCalled();
+  });
+
+  it('spend_gold emits { gold: -amount } on success, and does not fire when the hero cannot afford it', async () => {
+    const state = makeState();
+    state.character.gold = 30;
+    const engine = new Engine(state);
+    const onLedger = vi.fn();
+    const { tools } = createDmTools(engine, { onLedger });
+    const spendGold = findTool(tools, 'spend_gold');
+
+    await spendGold.handler({ amount: 5, reason: 'a room for the night' }, undefined);
+    expect(onLedger).toHaveBeenCalledExactlyOnceWith({ gold: -5 });
+    expect(engine.state.character.gold).toBe(25);
+
+    onLedger.mockClear();
+    await spendGold.handler({ amount: 999, reason: 'a horse' }, undefined); // more gold than they have -> ok:false
+    expect(onLedger).not.toHaveBeenCalled();
+    expect(engine.state.character.gold).toBe(25);
+  });
+
+  // The bug this pair of tools exists to make impossible: a live playtest had
+  // the referee answer "I pocket the ten gold pieces" with modify_gold(-10),
+  // so looting a corpse left the hero poorer. Direction now comes from WHICH
+  // tool is called, and a signed amount cannot reverse it.
+  it('direction comes from the tool, not the sign: a negative amount still moves gold the right way', async () => {
+    const state = makeState();
+    state.character.gold = 20;
+    const engine = new Engine(state);
+    const { tools } = createDmTools(engine);
+
+    await findTool(tools, 'award_gold').handler({ amount: -10, reason: 'pocketed the bandit\'s purse' }, undefined);
+    expect(engine.state.character.gold).toBe(30); // gained, never lost
+
+    await findTool(tools, 'spend_gold').handler({ amount: -4, reason: 'paid the ferryman' }, undefined);
+    expect(engine.state.character.gold).toBe(26); // spent, never gained
   });
 
   it("award_xp emits { xp, leveledTo: undefined } on a normal award, and leveledTo: <new level> on a level-up", async () => {
@@ -212,6 +247,49 @@ describe('createDmTools ledger events (LedgerDelta)', () => {
 
     onLedger.mockClear();
     await awardXp.handler({ amount: 300 }, undefined); // crosses the level-2 threshold (cumulative 300 xp)
+    expect(engine.state.character.level).toBe(2);
+    expect(onLedger).toHaveBeenCalledExactlyOnceWith({ xp: 300, leveledTo: 2 });
+  });
+
+  // Ten live turns killed a bandit on a natural 20, confirmed the body and
+  // looted it -- and XP never left 0, because award_xp is bookkeeping a small
+  // model drops. defeat_foe ties the reward to the one event it cannot miss.
+  it('defeat_foe awards the XP and records the foe in a single call', async () => {
+    const engine = new Engine(makeState());
+    const onLedger = vi.fn();
+    const { tools } = createDmTools(engine, { onLedger });
+    const defeatFoe = findTool(tools, 'defeat_foe');
+
+    const result = await defeatFoe.handler({ name: 'Cleft bandit', xp: 75 }, undefined);
+
+    expect(engine.state.character.xp).toBe(75);
+    expect(onLedger).toHaveBeenCalledExactlyOnceWith({ xp: 75, leveledTo: undefined });
+    const npc = engine.state.world.npcs.find((n) => n.name === 'Cleft bandit');
+    expect(npc?.status).toBe('dead');
+    expect(result.isError).toBeFalsy();
+  });
+
+  it('defeat_foe maps a non-lethal outcome to the right NPC status, and still pays XP', async () => {
+    const engine = new Engine(makeState());
+    const { tools } = createDmTools(engine);
+    const defeatFoe = findTool(tools, 'defeat_foe');
+
+    await defeatFoe.handler({ name: 'Roadside thug', xp: 30, outcome: 'fled' }, undefined);
+    expect(engine.state.world.npcs.find((n) => n.name === 'Roadside thug')?.status).toBe('missing');
+
+    await defeatFoe.handler({ name: 'Sellsword', xp: 40, outcome: 'surrendered' }, undefined);
+    expect(engine.state.world.npcs.find((n) => n.name === 'Sellsword')?.status).toBe('alive');
+
+    expect(engine.state.character.xp).toBe(70);
+  });
+
+  it('defeat_foe reports a level-up through the ledger, exactly like award_xp', async () => {
+    const engine = new Engine(makeState());
+    const onLedger = vi.fn();
+    const { tools } = createDmTools(engine, { onLedger });
+
+    await findTool(tools, 'defeat_foe').handler({ name: 'Bandit captain', xp: 300 }, undefined);
+
     expect(engine.state.character.level).toBe(2);
     expect(onLedger).toHaveBeenCalledExactlyOnceWith({ xp: 300, leveledTo: 2 });
   });
@@ -249,8 +327,8 @@ describe('createDmTools ledger events (LedgerDelta)', () => {
   it('never throws when hooks (or hooks.onLedger specifically) are absent', async () => {
     const engine = new Engine(makeState());
     const { tools } = createDmTools(engine); // no hooks object at all
-    const modifyGold = findTool(tools, 'modify_gold');
-    await expect(modifyGold.handler({ delta: 10, reason: 'test' }, undefined)).resolves.toBeDefined();
+    const awardGold = findTool(tools, 'award_gold');
+    await expect(awardGold.handler({ amount: 10, reason: 'test' }, undefined)).resolves.toBeDefined();
 
     const onToolResult = vi.fn();
     const { tools: tools2 } = createDmTools(engine, { onToolResult }); // hooks present, but no onLedger
