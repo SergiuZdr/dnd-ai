@@ -140,6 +140,7 @@ describe('DualModelDmSession', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     fs.rmSync(settingsDir, { recursive: true, force: true });
   });
 
@@ -472,6 +473,174 @@ describe('DualModelDmSession', () => {
     const narratorBody = bodyOf(fetchMock.mock.calls[2]);
     expect(refereeBody.model).toBe('referee-model');
     expect(narratorBody.model).toBe('referee-model'); // fell back to the referee's model
+  });
+
+  // Live failure this exists for: the referee rolled the attack, wrote "the
+  // man collapses, dead before he hits the ground", and called nothing else --
+  // the fight paid no XP and the foe was never recorded. Prompting it about
+  // defeat_foe did not fix that, so the code checks what the prompt cannot.
+  describe('missing defeat_foe nudge', () => {
+    const toolCallChunk = (name: string, args: string) => ({
+      choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_x', type: 'function' as const, function: { name, arguments: args } }] } }],
+    });
+
+    it('asks once when the beat sheet reports a kill but no defeat_foe landed, and the XP then lands', async () => {
+      const fetchMock = vi
+        .fn()
+        // Referee step 1: the beat sheet says the foe died, but calls nothing.
+        .mockResolvedValueOnce(
+          sseResponse([
+            { choices: [{ delta: { content: 'Arrow hit for 7. The bandit is dead before he hits the ground.' } }] },
+            { choices: [{ delta: {}, finish_reason: 'stop' }] },
+          ]),
+        )
+        // Referee step 2, after the nudge: now it pays up.
+        .mockResolvedValueOnce(
+          sseResponse([toolCallChunk('defeat_foe', '{"name":"Cleft bandit","xp":75}'), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]),
+        )
+        // Referee step 3: final beat sheet.
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'Bandit defeated, 75 XP.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        )
+        // Narrator.
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'He drops.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { engine, session, callbacks } = makeSession();
+      session.start();
+      session.send('I loose an arrow at the bandit.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect(engine.state.character.xp).toBe(75);
+      expect(engine.state.world.npcs.find((n) => n.name === 'Cleft bandit')?.status).toBe('dead');
+    });
+
+    // The wording-independent trigger: foes have no HP here, so a hero attack
+    // that connects leaves no mechanical trace at all. The first live attempt
+    // at this nudge missed precisely because it keyed off beat-sheet prose,
+    // and the referee wrote "collapses lifelessly" rather than "killed".
+    it('fires on a landed attack even when the beat sheet never says the foe died', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          sseResponse([
+            toolCallChunk('roll_dice', '{"expr":"d20+2","reason":"Attack — target throat","dc":16,"roller":"dm"}'),
+            { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+          ]),
+        )
+        // Beat sheet deliberately avoids every "died" synonym.
+        .mockResolvedValueOnce(
+          sseResponse([
+            { choices: [{ delta: { content: 'The arrow finds its mark. The trail is quiet again.' } }] },
+            { choices: [{ delta: {}, finish_reason: 'stop' }] },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([toolCallChunk('defeat_foe', '{"name":"Trail bandit","xp":50}'), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'Bandit defeated.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'He falls.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      vi.spyOn(Math, 'random').mockReturnValue(0.99); // d20 -> 20, a certain hit
+      const { engine, session, callbacks } = makeSession();
+      session.start();
+      session.send('I loose at his throat.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect(engine.state.character.xp).toBe(50);
+    });
+
+    it('does not fire when the attack missed', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          sseResponse([
+            toolCallChunk('roll_dice', '{"expr":"d20+2","reason":"Attack — bandit","dc":16,"roller":"dm"}'),
+            { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([
+            { choices: [{ delta: { content: 'The arrow sails wide. The bandit walks on, unaware.' } }] },
+            { choices: [{ delta: {}, finish_reason: 'stop' }] },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'You miss.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      vi.spyOn(Math, 'random').mockReturnValue(0); // d20 -> 1, a certain miss
+      const { engine, session, callbacks } = makeSession();
+      session.start();
+      session.send('I shoot at him.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect(engine.state.character.xp).toBe(0);
+      expect(fetchMock).toHaveBeenCalledTimes(3); // 2 referee + 1 narrator, no nudge
+    });
+
+    it('does not mistake the hero going down for a victory', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          sseResponse([
+            { choices: [{ delta: { content: 'The ogre hits for 9. Hero is dead at 0 HP.' } }] },
+            { choices: [{ delta: {}, finish_reason: 'stop' }] },
+          ]),
+        )
+        // The zero-tool nudge still applies here; answer it by standing pat.
+        .mockResolvedValueOnce(
+          sseResponse([
+            { choices: [{ delta: { content: 'The ogre hits for 9. Hero is dead at 0 HP.' } }] },
+            { choices: [{ delta: {}, finish_reason: 'stop' }] },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'Darkness takes you.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { engine, session, callbacks } = makeSession();
+      session.start();
+      session.send('I charge the ogre.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect(engine.state.character.xp).toBe(0);
+      // 2 referee calls (the zero-tool nudge) + 1 narrator -- no defeat_foe nudge.
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('nudges at most once per turn, so a stubborn referee cannot loop', async () => {
+      const deadBeatSheet = () =>
+        sseResponse([
+          { choices: [{ delta: { content: 'The wolf is killed.' } }] },
+          { choices: [{ delta: {}, finish_reason: 'stop' }] },
+        ]);
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(deadBeatSheet()) // triggers the zero-tool nudge
+        .mockResolvedValueOnce(deadBeatSheet()) // triggers the defeat_foe nudge
+        .mockResolvedValueOnce(deadBeatSheet()) // still nothing -- must give up now
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'The wolf lies still.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { session, callbacks } = makeSession();
+      session.start();
+      session.send('I fight the wolf.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect(fetchMock).toHaveBeenCalledTimes(4); // 3 referee + 1 narrator, then it commits
+    });
   });
 
   // Both of these are live-playtest failures, not hypotheticals: on one turn

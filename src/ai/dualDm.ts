@@ -94,6 +94,25 @@ export const STREAM_STALL_TIMEOUT_MS = 90_000;
  */
 const NARRATOR_EMPTY_RETRIES = 1;
 
+/**
+ * Words a referee beat sheet uses when an enemy stops fighting. Kept to plain,
+ * unambiguous outcome verbs -- "wounded", "bleeding", "staggered" are all
+ * deliberately absent, because a foe who is merely hurt has not been defeated
+ * and nudging for defeat_foe there would teach the referee to hand out XP mid-fight.
+ */
+const FOE_DOWN_RE =
+  /\b(kill(?:s|ed)?|slain|slays?|dead|dies|died|defeat(?:s|ed)?|cut down|struck down|knocked out|unconscious|surrender(?:s|ed)?|flees|fled|routed|eliminated|lifeless|collapses|slumps|drops? dead|falls? (?:dead|lifeless)|no longer a threat|is down|goes down)\b/i;
+
+/**
+ * Labels the referee gives a roll when the hero is swinging at something. Used
+ * as the second, structural trigger for the missing-defeat_foe nudge: foes have
+ * no HP in this engine, so a hero attack that CONNECTS leaves no mechanical
+ * trace whatsoever -- the only tool a fight can ever move is defeat_foe. A
+ * successful attack roll and a turn ending with no defeat_foe is therefore
+ * worth one question, regardless of how the beat sheet happened to word it.
+ */
+const ATTACK_LABEL_RE = /\b(attack|shot|shoot|strike|swing|stab|slash|thrust|fire[sd]?|loose[sd]?|arrow|blade|blow|melee|ranged)\b/i;
+
 type ToolMessageCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
 
 type RefereeMessage =
@@ -127,6 +146,21 @@ export interface ToolOutcomeRecord {
   args: Record<string, unknown>;
   ok: boolean;
   resultText: string;
+}
+
+/**
+ * True when this turn contains a hero attack roll that HIT. The engine's own
+ * roll message carries the verdict ("-- ✓ success"), so this reads the
+ * mechanical result and only uses the label to decide whether the roll was an
+ * attack at all.
+ */
+export function landedAnAttack(outcomes: ToolOutcomeRecord[]): boolean {
+  return outcomes.some((o) => {
+    if (o.tool !== 'roll_dice' || !o.ok) return false;
+    if (!/success/i.test(o.resultText)) return false;
+    const label = typeof o.args.reason === 'string' ? o.args.reason : '';
+    return ATTACK_LABEL_RE.test(label);
+  });
 }
 
 /** Renders a turn's ToolOutcomeRecord[] into the plain-text block the narrator's prompt embeds -- one line per tool call, in call order. */
@@ -274,6 +308,8 @@ export class DualModelDmSession {
   private lastPlayerText = '';
   /** Per-turn latch for the zero-tool nudge in runRefereePhase() -- reset at the top of every referee phase so the retry is offered once per player turn, never once per session. */
   private retriedEmptyTurn = false;
+  /** Sibling latch for the missing-defeat_foe nudge -- same once-per-player-turn contract as retriedEmptyTurn. */
+  private retriedMissingDefeat = false;
 
   private abortController?: AbortController;
   private runTurnPromise?: Promise<void>;
@@ -460,6 +496,7 @@ export class DualModelDmSession {
     let beatSheet = '';
     const outcomes: ToolOutcomeRecord[] = [];
     this.retriedEmptyTurn = false;
+    this.retriedMissingDefeat = false;
 
     for (let step = 0; step < this.maxSteps; step++) {
       if (this.closed) return undefined;
@@ -565,6 +602,34 @@ export class DualModelDmSession {
         continue;
       }
 
+      // The referee is willing to roll for a fight and then walk away from
+      // its consequences: in a live turn it rolled the attack, wrote "the man
+      // collapses, dead before he hits the ground", and called nothing else --
+      // no XP, no NPC record. Telling it about defeat_foe in the prompt did not
+      // fix that, so this checks the one thing the prompt cannot: the beat
+      // sheet SAYS something went down, yet no defeat_foe landed. Same shape as
+      // the zero-tool nudge above, and the referee is free to decline (it was
+      // the hero who fell, or nobody actually died) by repeating its beat sheet.
+      const defeatMissing = !outcomes.some((o) => o.tool === 'defeat_foe' && o.ok);
+      const combatHappened = this.beatSheetReportsFoeDown(beatSheet) || landedAnAttack(outcomes);
+      if (!this.retriedMissingDefeat && defeatMissing && combatHappened) {
+        this.retriedMissingDefeat = true;
+        // Server-side only: whether this nudge fires (and whether it works) is
+        // otherwise invisible, and it is the one guardrail standing between a
+        // won fight and 0 XP.
+        console.error('[referee] fight ended with no defeat_foe — nudging once');
+        this.refereeMessages.push({
+          role: 'assistant',
+          content: stepResult.content.length > 0 ? stepResult.content : '(no beat sheet produced)',
+        });
+        this.refereeMessages.push({
+          role: 'user',
+          content:
+            'This turn involved a fight, and you are about to end it without calling defeat_foe — so the hero earns NOTHING for it: no XP, and the foe\'s fate is never recorded. If an enemy was killed, knocked out, driven off, or surrendered, call defeat_foe NOW with their name and the XP earned (25-100 a thug or minor beast, 150-450 a real fight, 500+ a boss), plus award_gold / add_item for anything lootable you described. Remember the hero\'s attacks leave no other trace: a foe you described going down but never passed to defeat_foe is still walking around as far as the game is concerned. If the foe is genuinely still standing and the fight continues, that is fine — call nothing and reply with your beat sheet again.',
+        });
+        continue;
+      }
+
       // No tool calls -- this step's completion IS the beat sheet.
       return { beatSheet, outcomes };
     }
@@ -574,6 +639,29 @@ export class DualModelDmSession {
     // hanging forever (mirrors OpenAiDmSession's own maxTurns cap).
     this.callbacks.onSystemNote?.('(reached the internal referee turn-step limit — ending the turn)');
     return { beatSheet, outcomes };
+  }
+
+  /**
+   * True when the beat sheet plainly reports something stopping fighting.
+   *
+   * Deliberately a blunt keyword test, and deliberately allowed to be wrong:
+   * a false positive costs one extra referee request that the model answers by
+   * repeating its beat sheet, while a false negative costs the player the XP
+   * for a whole fight. Lines that are only about the HERO going down are
+   * skipped, so a hero death does not get mistaken for a victory.
+   */
+  private beatSheetReportsFoeDown(beatSheet: string): boolean {
+    if (!beatSheet) return false;
+    const heroName = this.config.stateSnapshot?.()?.character.name;
+    return beatSheet
+      .split(/(?<=[.!?])\s+|\n+/)
+      .filter((sentence) => {
+        // "Bran takes 6 damage and falls" is not a victory. Only skip when the
+        // sentence is about the hero and no separate foe is named as going down.
+        const aboutHero = /\b(hero|player)\b/i.test(sentence) || (heroName ? sentence.includes(heroName) : false);
+        return !aboutHero;
+      })
+      .some((sentence) => FOE_DOWN_RE.test(sentence));
   }
 
   private assistantMessageFor(step: StepResult): RefereeMessage {
