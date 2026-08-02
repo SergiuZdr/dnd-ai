@@ -96,8 +96,8 @@ export interface GameState {
 export const SCHEMA_VERSION = 3;
 
 /**
- * Structured deltas for a single successful gain/loss tool call (modify_gold,
- * award_xp, add_item, remove_item) -- see tools.ts's hooks.onLedger and
+ * Structured deltas for a single successful gain/loss tool call (award_gold,
+ * spend_gold, award_xp, defeat_foe, add_item, remove_item) -- see tools.ts's hooks.onLedger and
  * controller.ts's ControllerCallbacks.onLedgerGain. Lets the web front-end
  * render a "YOU GAINED" toast without parsing engine message strings.
  */

@@ -1,4 +1,4 @@
-// Acceptance criterion: toolSchema emits exactly 11 OpenAI function schemas
+// Acceptance criterion: toolSchema emits exactly 13 OpenAI function schemas
 // whose names + required fields match createDmTools().tools -- derived FROM
 // the same zod shapes the Claude backend's MCP server uses, so the two can
 // never silently drift apart (PR-6).
@@ -45,7 +45,9 @@ const EXPECTED_TOOL_NAMES = [
   'apply_damage',
   'heal',
   'award_xp',
-  'modify_gold',
+  'defeat_foe',
+  'award_gold',
+  'spend_gold',
   'add_item',
   'remove_item',
   'upsert_quest',
@@ -55,15 +57,15 @@ const EXPECTED_TOOL_NAMES = [
 ];
 
 describe('toolsToOpenAiSchemas', () => {
-  it('emits exactly 11 schemas whose names match createDmTools().tools exactly (same order, same set)', () => {
+  it('emits exactly 13 schemas whose names match createDmTools().tools exactly (same order, same set)', () => {
     const engine = new Engine(makeState());
     const { tools } = createDmTools(engine);
 
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(13);
     expect(tools.map((t) => t.name)).toEqual(EXPECTED_TOOL_NAMES);
 
     const schemas = toolsToOpenAiSchemas(tools);
-    expect(schemas).toHaveLength(11);
+    expect(schemas).toHaveLength(13);
     expect(schemas.map((s) => s.function.name)).toEqual(tools.map((t) => t.name));
   });
 

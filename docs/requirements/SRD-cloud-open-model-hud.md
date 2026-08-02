@@ -151,7 +151,7 @@ Ordered so the highest-value, lowest-risk wins land first. Each phase is indepen
 ## 9. Product Requirements (summary; detail belongs in a PRD)
 
 - **PR-1 Pluggable DM backend.** A model client that speaks OpenAI-compatible Chat Completions **with tool/function calling**, drop-in behind the current `DmSession`. Config: `baseUrl`, `apiKey` (optional for local), `model`; per-campaign override honored. Streaming preserved for the typing feel.
-- **PR-2 Tool bridge.** The 11 engine tools (roll_dice, apply_damage, heal, award_xp, modify_gold, add_item, remove_item, upsert_quest, upsert_npc, set_location, record_fact) re-expressed as OpenAI function schemas; the interactive player-roll pause/confirm/luck flow preserved.
+- **PR-2 Tool bridge.** The 13 engine tools (roll_dice, apply_damage, heal, award_xp, defeat_foe, award_gold, spend_gold, add_item, remove_item, upsert_quest, upsert_npc, set_location, record_fact) re-expressed as OpenAI function schemas; the interactive player-roll pause/confirm/luck flow preserved.
 - **PR-3 Reliability guardrails.** Force-tool prompting; validate that consequential turns produced the expected tool calls; single retry/nudge on violation; keep the per-turn mechanics reminder.
 - **PR-4 Summarizer.** Chronicle summarization uses the same endpoint (no Claude dependency).
 - **PR-5 Resume bug.** On opening/continuing a save, push current character + world state to the UI immediately (independent of any DM turn) so the panel is populated on load.

@@ -89,11 +89,11 @@ describe('repairAndValidateArgs', () => {
   it('drops unknown/extra keys the model hallucinated, keeping the call valid', () => {
     const engine = new Engine(makeState());
     const { tools } = createDmTools(engine);
-    const modifyGold = findTool(tools, 'modify_gold');
+    const awardGold = findTool(tools, 'award_gold');
 
-    const result = repairAndValidateArgs(modifyGold, { delta: 10, reason: 'sold loot', confidence: 0.9, extra: 'noise' });
+    const result = repairAndValidateArgs(awardGold, { amount: 10, reason: 'sold loot', confidence: 0.9, extra: 'noise' });
 
-    expect(result).toEqual({ ok: true, args: { delta: 10, reason: 'sold loot' } });
+    expect(result).toEqual({ ok: true, args: { amount: 10, reason: 'sold loot' } });
   });
 
   it('passes already-well-formed args through unchanged', () => {

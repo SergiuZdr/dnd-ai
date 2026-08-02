@@ -28,8 +28,8 @@ export interface ToolHooks {
    */
   interactiveRoll?: (request: InteractiveRollRequest) => Promise<EngineResult>;
   /**
-   * Fires exactly once per successful (result.ok) modify_gold / award_xp /
-   * add_item / remove_item call, with a structured delta describing what just
+   * Fires exactly once per successful (result.ok) award_gold / spend_gold /
+   * award_xp / defeat_foe / add_item / remove_item call, with a structured delta describing what just
    * changed -- the controller wires this straight to
    * ControllerCallbacks.onLedgerGain so the web front-end can render a "YOU
    * GAINED" toast without parsing engine message strings. Never fires for a
@@ -154,18 +154,101 @@ export function createDmTools(
     },
   );
 
-  const modifyGold = tool(
-    'modify_gold',
-    'Call the moment money changes hands — looting, buying, selling, paying a bribe, a reward. ' +
-      'Use a negative delta when gold leaves the hero, positive when it arrives.',
+  // The fix for "a whole fight that ends with 0 XP". Telling the referee to
+  // remember award_xp did not work: a live playtest killed a bandit on a
+  // natural 20, confirmed the body and looted it across three turns, and XP
+  // never moved off 0 -- award_xp is bookkeeping, and bookkeeping is exactly
+  // what a small model drops. defeat_foe is keyed to something it cannot miss
+  // (the foe stopped fighting) and bundles the two calls that must both happen
+  // anyway, so the reliable trigger and the easily-forgotten reward become one
+  // action.
+  const defeatFoe = tool(
+    'defeat_foe',
+    'Call the moment an enemy stops being a threat — killed, knocked out, driven off, or surrendered. ' +
+      'This is how a fight ENDS: it records the foe and awards the hero their XP in a single step. ' +
+      'A fight the hero wins must never end without this call. ' +
+      'xp guide: 25-100 a thug, a wolf, a minor threat; 150-450 a real fight; 500+ a boss or a campaign turn.',
     {
-      delta: z.number().int(),
+      name: z.string().describe('The foe, e.g. "Cleft bandit" — the same name you would pass to upsert_npc.'),
+      xp: z.number().int().describe('XP the hero earns. 25-100 minor, 150-450 significant, 500+ major.'),
+      outcome: z.enum(['killed', 'incapacitated', 'fled', 'surrendered']).optional(),
+    },
+    async ({ name, xp, outcome }) => {
+      const amount = Math.abs(xp);
+      const xpResult = engine.awardXp(amount);
+      if (xpResult.ok) {
+        hooks?.onLedger?.({
+          xp: amount,
+          leveledTo: xpResult.events.includes('level-up') ? engine.state.character.level : undefined,
+        });
+      }
+
+      const how = outcome ?? 'killed';
+      const status = how === 'killed' ? 'dead' : how === 'fled' ? 'missing' : 'alive';
+      const npcResult = engine.upsertNpc(name, {
+        status,
+        fact: `Defeated by ${engine.state.character.name} (${how}).`,
+      });
+
+      // One combined result, so the referee sees a single honest answer: the
+      // XP line is what matters mechanically, the NPC line only if it failed.
+      const result: EngineResult = xpResult.ok
+        ? {
+            ok: true,
+            message: npcResult.ok
+              ? `${name} ${how}. ${xpResult.message}`
+              : `${name} ${how}. ${xpResult.message} (could not record the foe: ${npcResult.error})`,
+            events: xpResult.events,
+          }
+        : xpResult;
+      hooks?.onToolResult?.('defeat_foe', result);
+      return toCallToolResult(result);
+    },
+  );
+
+  // Two positive-only tools where there used to be one signed
+  // modify_gold(delta). In a live playtest the referee answered "I pocket the
+  // ten gold pieces" with delta:-10 -- looting a corpse left the hero POORER
+  // than before he looted it. Direction was the one thing the model had to get
+  // right and the one thing a single signed argument let it get backwards, so
+  // direction is no longer carried in the argument at all: it is the choice of
+  // tool. Math.abs() closes the last gap, since a model that "helpfully" signs
+  // the amount (spend_gold with -10) then still spends rather than reversing
+  // the transfer. The schema stays a plain int for the same reason -- a
+  // .positive() constraint would reject that call outright instead of doing
+  // the obvious right thing with it.
+  const awardGold = tool(
+    'award_gold',
+    'Call the moment gold ARRIVES for the hero — loot taken from a body or a chest, a reward, a bounty, ' +
+      'payment for a job, winnings, treasure found. amount is how much they GAIN. ' +
+      'If the hero picks up, pockets, takes, or is handed coin, it is THIS tool, never spend_gold.',
+    {
+      amount: z.number().int().describe('How much gold the hero GAINS. Positive.'),
       reason: z.string(),
     },
-    async ({ delta, reason }) => {
-      const result = engine.modifyGold(delta);
-      hooks?.onToolResult?.('modify_gold', result);
-      if (result.ok) hooks?.onLedger?.({ gold: delta });
+    async ({ amount, reason }) => {
+      const gained = Math.abs(amount);
+      const result = engine.modifyGold(gained);
+      hooks?.onToolResult?.('award_gold', result);
+      if (result.ok) hooks?.onLedger?.({ gold: gained });
+      return toCallToolResult(result);
+    },
+  );
+
+  const spendGold = tool(
+    'spend_gold',
+    'Call the moment gold LEAVES the hero — a purchase, a room for the night, a bribe they pay, a toll, ' +
+      'a fine, a debt settled, coin stolen from them. amount is how much they LOSE. ' +
+      'Never use this when the hero receives money — that is award_gold.',
+    {
+      amount: z.number().int().describe('How much gold the hero LOSES. Positive.'),
+      reason: z.string(),
+    },
+    async ({ amount, reason }) => {
+      const spent = Math.abs(amount);
+      const result = engine.modifyGold(-spent);
+      hooks?.onToolResult?.('spend_gold', result);
+      if (result.ok) hooks?.onLedger?.({ gold: -spent });
       return toCallToolResult(result);
     },
   );
@@ -278,7 +361,9 @@ export function createDmTools(
     applyDamage,
     heal,
     awardXp,
-    modifyGold,
+    defeatFoe,
+    awardGold,
+    spendGold,
     addItem,
     removeItem,
     upsertQuest,
