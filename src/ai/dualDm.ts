@@ -104,12 +104,13 @@ const FOE_DOWN_RE =
   /\b(kill(?:s|ed)?|slain|slays?|dead|dies|died|defeat(?:s|ed)?|cut down|struck down|knocked out|unconscious|surrender(?:s|ed)?|flees|fled|routed|eliminated|lifeless|collapses|slumps|drops? dead|falls? (?:dead|lifeless)|no longer a threat|is down|goes down)\b/i;
 
 /**
- * Labels the referee gives a roll when the hero is swinging at something. Used
- * as the second, structural trigger for the missing-defeat_foe nudge: foes have
- * no HP in this engine, so a hero attack that CONNECTS leaves no mechanical
- * trace whatsoever -- the only tool a fight can ever move is defeat_foe. A
- * successful attack roll and a turn ending with no defeat_foe is therefore
- * worth one question, regardless of how the beat sheet happened to word it.
+ * Labels the referee gives a roll when someone is swinging at someone. Used as
+ * the structural trigger for the missing combat-consequence nudge, covering
+ * blows in both directions: a hero attack that connects should end with a
+ * damaged or defeated foe, and an enemy attack that connects should end with
+ * apply_damage. Keying off the mechanical verdict rather than the beat sheet's
+ * wording is the whole point -- the first version of this check read the prose
+ * and missed a kill that was worded "collapses lifelessly".
  */
 const ATTACK_LABEL_RE = /\b(attack|shot|shoot|strike|swing|stab|slash|thrust|fire[sd]?|loose[sd]?|arrow|blade|blow|melee|ranged)\b/i;
 
@@ -308,8 +309,8 @@ export class DualModelDmSession {
   private lastPlayerText = '';
   /** Per-turn latch for the zero-tool nudge in runRefereePhase() -- reset at the top of every referee phase so the retry is offered once per player turn, never once per session. */
   private retriedEmptyTurn = false;
-  /** Sibling latch for the missing-defeat_foe nudge -- same once-per-player-turn contract as retriedEmptyTurn. */
-  private retriedMissingDefeat = false;
+  /** Sibling latch for the missing combat-consequence nudge -- same once-per-player-turn contract as retriedEmptyTurn. */
+  private retriedMissingConsequence = false;
 
   private abortController?: AbortController;
   private runTurnPromise?: Promise<void>;
@@ -496,7 +497,7 @@ export class DualModelDmSession {
     let beatSheet = '';
     const outcomes: ToolOutcomeRecord[] = [];
     this.retriedEmptyTurn = false;
-    this.retriedMissingDefeat = false;
+    this.retriedMissingConsequence = false;
 
     for (let step = 0; step < this.maxSteps; step++) {
       if (this.closed) return undefined;
@@ -610,14 +611,21 @@ export class DualModelDmSession {
       // sheet SAYS something went down, yet no defeat_foe landed. Same shape as
       // the zero-tool nudge above, and the referee is free to decline (it was
       // the hero who fell, or nobody actually died) by repeating its beat sheet.
-      const defeatMissing = !outcomes.some((o) => o.tool === 'defeat_foe' && o.ok);
+      // An attack that CONNECTS must leave a mark somewhere: the hero's HP if
+      // the blow was aimed at them, or a defeated foe if it was theirs. Neither
+      // tool firing after a successful attack roll means the fight happened
+      // only in prose -- which is exactly what a live turn did twice, once
+      // letting a killed bandit pay no XP and once letting a landed enemy blow
+      // ("the force of the blow jolting through your body") leave the HP bar
+      // untouched at 7/12.
+      const consequenceMissing = !outcomes.some((o) => (o.tool === 'defeat_foe' || o.tool === 'apply_damage') && o.ok);
       const combatHappened = this.beatSheetReportsFoeDown(beatSheet) || landedAnAttack(outcomes);
-      if (!this.retriedMissingDefeat && defeatMissing && combatHappened) {
-        this.retriedMissingDefeat = true;
+      if (!this.retriedMissingConsequence && consequenceMissing && combatHappened) {
+        this.retriedMissingConsequence = true;
         // Server-side only: whether this nudge fires (and whether it works) is
         // otherwise invisible, and it is the one guardrail standing between a
         // won fight and 0 XP.
-        console.error('[referee] fight ended with no defeat_foe — nudging once');
+        console.error('[referee] an attack landed but nothing was recorded — nudging once');
         this.refereeMessages.push({
           role: 'assistant',
           content: stepResult.content.length > 0 ? stepResult.content : '(no beat sheet produced)',
@@ -625,7 +633,10 @@ export class DualModelDmSession {
         this.refereeMessages.push({
           role: 'user',
           content:
-            'This turn involved a fight, and you are about to end it without calling defeat_foe — so the hero earns NOTHING for it: no XP, and the foe\'s fate is never recorded. If an enemy was killed, knocked out, driven off, or surrendered, call defeat_foe NOW with their name and the XP earned (25-100 a thug or minor beast, 150-450 a real fight, 500+ a boss), plus award_gold / add_item for anything lootable you described. Remember the hero\'s attacks leave no other trace: a foe you described going down but never passed to defeat_foe is still walking around as far as the game is concerned. If the foe is genuinely still standing and the fight continues, that is fine — call nothing and reply with your beat sheet again.',
+            'An attack LANDED this turn and you are about to end the turn without recording what it did. A blow that connects must change something, or it did not happen at all as far as the player\'s screen is concerned. Right now, before you finish:\n' +
+            '- Did an enemy hit the HERO? Call apply_damage NOW with the damage, this turn, not next turn. Their HP bar is the only injury the player can see; prose about a blow "jolting through your body" over an unchanged HP bar is a bug they will notice immediately.\n' +
+            '- Did an enemy go down — killed, knocked out, driven off, surrendered? Call defeat_foe with their name and the XP (25-100 a thug or minor beast, 150-450 a real fight, 500+ a boss), plus award_gold / add_item for anything lootable you described. A foe you described dropping but never passed to defeat_foe is still alive as far as the game is concerned, and the fight paid nothing.\n' +
+            'If the hero was genuinely untouched and the foe is genuinely still standing, that is fine — call nothing and reply with your beat sheet again.',
         });
         continue;
       }
