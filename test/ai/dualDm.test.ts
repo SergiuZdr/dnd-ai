@@ -557,6 +557,76 @@ describe('DualModelDmSession', () => {
       expect(engine.state.character.xp).toBe(50);
     });
 
+    // The other half of the same failure, seen live: the bandit's blow landed
+    // (21 vs AC 16), the prose said "the force of the blow jolting through your
+    // body", and the HP bar sat unmoved at 7/12 because apply_damage was never
+    // called.
+    it('fires when an enemy blow lands but the hero takes no damage', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          sseResponse([
+            toolCallChunk('roll_dice', '{"expr":"d20+3","reason":"Bandit attack","dc":16,"roller":"dm"}'),
+            { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([
+            { choices: [{ delta: { content: 'The bandit counters and the blow connects.' } }] },
+            { choices: [{ delta: {}, finish_reason: 'stop' }] },
+          ]),
+        )
+        // After the nudge, the damage finally lands.
+        .mockResolvedValueOnce(
+          sseResponse([toolCallChunk('apply_damage', '{"amount":5,"reason":"bandit counterattack"}'), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'Hero takes 5.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'It hurts.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      vi.spyOn(Math, 'random').mockReturnValue(0.99); // the bandit's attack hits
+      const { engine, session, callbacks } = makeSession();
+      session.start();
+      session.send('I press the attack.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect(engine.state.character.hp).toBe(7); // 12 - 5, applied THIS turn
+    });
+
+    it('stays quiet when the damage was already applied', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          sseResponse([
+            toolCallChunk('roll_dice', '{"expr":"d20+3","reason":"Bandit attack","dc":16,"roller":"dm"}'),
+            { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([toolCallChunk('apply_damage', '{"amount":4,"reason":"bandit blow"}'), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'Hero takes 4.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'You reel.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      vi.spyOn(Math, 'random').mockReturnValue(0.99);
+      const { engine, session, callbacks } = makeSession();
+      session.start();
+      session.send('I press the attack.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect(engine.state.character.hp).toBe(8);
+      expect(fetchMock).toHaveBeenCalledTimes(4); // 3 referee + 1 narrator, no nudge
+    });
+
     it('does not fire when the attack missed', async () => {
       const fetchMock = vi
         .fn()
