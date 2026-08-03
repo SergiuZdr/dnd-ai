@@ -41,6 +41,25 @@ export interface ToolHooks {
 const SERVER_NAME = 'dnd';
 
 /**
+ * Maps a foe name the referee just used onto one already in the world, when
+ * exactly one existing NPC obviously refers to the same character ("Bandit" ->
+ * "Trail bandit"). Returns the original name when there is no match or more
+ * than one, so an ambiguous case creates a new record rather than silently
+ * killing the wrong NPC.
+ */
+function resolveFoeName(engine: Engine, name: string): string {
+  const needle = name.trim().toLowerCase();
+  if (needle.length === 0) return name;
+  const npcs = engine.state.world.npcs;
+  if (npcs.some((n) => n.name.toLowerCase() === needle)) return name; // exact match: nothing to do
+  const candidates = npcs.filter((n) => {
+    const other = n.name.toLowerCase();
+    return n.status === 'alive' && (other.includes(needle) || needle.includes(other));
+  });
+  return candidates.length === 1 ? candidates[0].name : name;
+}
+
+/**
  * Shared handler tail: report the result to hooks, then translate it into the
  * MCP CallToolResult shape (ok -> plain text; error -> ERROR-prefixed text
  * with isError set, so the DM sees a clearly-flagged failure and can weave a
@@ -185,7 +204,13 @@ export function createDmTools(
 
       const how = outcome ?? 'killed';
       const status = how === 'killed' ? 'dead' : how === 'fled' ? 'missing' : 'alive';
-      const npcResult = engine.upsertNpc(name, {
+      // Match a foe already on the roster before creating a new one. The
+      // referee names the same enemy loosely between turns -- a live kill of
+      // "Trail bandit" came back through here as "Bandit" and left the world
+      // holding two records, one dead and one still walking around. Only an
+      // unambiguous single containment match counts; anything else keeps the
+      // name the referee gave.
+      const npcResult = engine.upsertNpc(resolveFoeName(engine, name), {
         status,
         fact: `Defeated by ${engine.state.character.name} (${how}).`,
       });

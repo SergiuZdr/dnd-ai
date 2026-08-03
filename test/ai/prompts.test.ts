@@ -345,6 +345,17 @@ describe('playtest-driven mechanics guardrails', () => {
     });
   }
 
+  // Five straight misses at DC 16 for a level-1 melee swing, live. The DC
+  // scale existed but said nothing about what a routine enemy should defend
+  // at, so the referee pitched a roadside bandit like plate armour.
+  for (const [name, prompt] of toolOwners) {
+    it(name + ' says what an ordinary foe actually defends at', () => {
+      expect(prompt).toMatch(/11-13/);
+      expect(prompt).toMatch(/thug, bandit, wolf or town guard/i);
+      expect(prompt).toMatch(/the DC was wrong, not the dice/i);
+    });
+  }
+
   it('the narrator may not invent a reward the ledger does not have', () => {
     const prompt = narratorSystemPrompt('PG-13');
     expect(prompt).toMatch(/NEVER INVENT A REWARD/i);
