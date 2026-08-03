@@ -269,6 +269,37 @@ describe('createDmTools ledger events (LedgerDelta)', () => {
     expect(result.isError).toBeFalsy();
   });
 
+  // The referee names the same enemy loosely across turns: a live kill of the
+  // world's "Trail bandit" came back through defeat_foe as "Bandit", leaving
+  // two records -- one dead, one still walking around.
+  it('defeat_foe kills the foe already on the roster when the name obviously refers to them', async () => {
+    const state = makeState();
+    state.world.npcs.push({ name: 'Trail bandit', disposition: 'hostile', status: 'alive', facts: [] });
+    const engine = new Engine(state);
+    const { tools } = createDmTools(engine);
+
+    await findTool(tools, 'defeat_foe').handler({ name: 'Bandit', xp: 50 }, undefined);
+
+    expect(engine.state.world.npcs).toHaveLength(1);
+    expect(engine.state.world.npcs[0].name).toBe('Trail bandit');
+    expect(engine.state.world.npcs[0].status).toBe('dead');
+  });
+
+  it('defeat_foe creates a separate record when the name is ambiguous, rather than killing the wrong NPC', async () => {
+    const state = makeState();
+    state.world.npcs.push(
+      { name: 'Trail bandit', disposition: 'hostile', status: 'alive', facts: [] },
+      { name: 'Cliff bandit', disposition: 'hostile', status: 'alive', facts: [] },
+    );
+    const engine = new Engine(state);
+    const { tools } = createDmTools(engine);
+
+    await findTool(tools, 'defeat_foe').handler({ name: 'Bandit', xp: 50 }, undefined);
+
+    expect(engine.state.world.npcs).toHaveLength(3); // both originals untouched
+    expect(engine.state.world.npcs.filter((n) => n.status === 'alive')).toHaveLength(2);
+  });
+
   it('defeat_foe maps a non-lethal outcome to the right NPC status, and still pays XP', async () => {
     const engine = new Engine(makeState());
     const { tools } = createDmTools(engine);

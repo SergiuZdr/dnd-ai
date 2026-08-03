@@ -376,8 +376,15 @@ export class GameController {
     // never got to answer (the last player/dm transcript line is a PLAYER
     // line), that action must not be silently dropped -- send the brief now
     // so the DM answers it, same as before this fix.
-    const lastPlayerOrDm = [...unsummarized].reverse().find((entry) => entry.role === 'player' || entry.role === 'dm');
-    if (lastPlayerOrDm?.role === 'player') {
+    // Deliberately the last entry of ANY role, including 'system'. A failed
+    // turn now records one (see handleError), and that is what stops the
+    // recovery from re-firing on every reopen: the action HAS been responded
+    // to -- with a failure the player has already seen -- so re-sending it
+    // unasked would just spend another turn's quota on the same thing.
+    const lastEntry = [...unsummarized]
+      .reverse()
+      .find((entry) => entry.role === 'player' || entry.role === 'dm' || entry.role === 'system');
+    if (lastEntry?.role === 'player') {
       this.setBusy(true);
       this.session.send(brief);
     } else {
@@ -662,20 +669,31 @@ export class GameController {
 
     this.cb.onSystemNote(err.friendly);
 
-    // A failure on the very first turn is the one that strands a player: the
-    // story is empty, the transient note vanishes on reload, and the screen
-    // just sits there with nothing to act on -- which is exactly what happened
-    // to a new campaign that went 40 minutes blank until its owner typed
-    // something in frustration and got a normal reply 7 seconds later. Persist
-    // an entry so the log is never silently empty, and say plainly that typing
-    // anything will start the scene.
-    if (this.storyIsEmpty()) {
-      this.cb.onStoryAppend({
-        id: this.nextStoryId++,
-        kind: 'system',
-        text: `${err.friendly}\n\nThe opening scene never arrived. Type anything below to begin — your campaign is saved and intact.`,
-      });
-    }
+    // Persist the failure to the TRANSCRIPT, not just the screen. Two separate
+    // bugs came out of only doing the latter:
+    //
+    //   - onSystemNote is transient, so reloading after a failed turn showed
+    //     the player's action sitting there with no reply and no explanation.
+    //   - worse, start('resume') treats "the last line is a player line" as
+    //     "the DM never got to answer" and helpfully re-sends it. With nothing
+    //     written after a failure, that condition stayed true forever, so every
+    //     single reopen silently billed another DM turn -- on a 50-requests-a-day
+    //     free tier, reopening a campaign a few times could quietly spend the
+    //     day's budget on a turn that had already failed.
+    //
+    // Writing a system line fixes both: the player sees what happened, and the
+    // resume check (which now looks at the last entry of ANY role) sees the
+    // action was already answered -- by a failure -- and waits for them instead.
+    const failureNote = this.storyIsEmpty()
+      ? `${err.friendly}\n\nThe opening scene never arrived. Type anything below to begin — your campaign is saved and intact.`
+      : `${err.friendly}\n\nThat turn did not go through, so nothing in the story changed. Act again when you're ready.`;
+
+    this.cb.onStoryAppend({ id: this.nextStoryId++, kind: 'system', text: failureNote });
+    appendTranscript(
+      this.state.campaign.slug,
+      { role: 'system', text: failureNote, ts: new Date().toISOString() },
+      this.baseDir,
+    );
 
     this.setBusy(false);
     this.notifyIdle();

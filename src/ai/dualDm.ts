@@ -92,7 +92,7 @@ export const STREAM_STALL_TIMEOUT_MS = 90_000;
  * referee phase there is no tool state to replay -- so the turn is retried once
  * before the player is told it failed.
  */
-const NARRATOR_EMPTY_RETRIES = 1;
+const NARRATOR_EMPTY_RETRIES = 2;
 
 /**
  * Words a referee beat sheet uses when an enemy stops fighting. Kept to plain,

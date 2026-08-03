@@ -744,11 +744,12 @@ describe('DualModelDmSession', () => {
       expect(fetchMock).toHaveBeenCalledTimes(4);
     });
 
-    it('gives up honestly when the narration is empty twice', async () => {
+    it('gives up honestly once the retry budget is spent, rather than looping', async () => {
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce(beatSheetOnly())
         .mockResolvedValueOnce(beatSheetOnly())
+        .mockResolvedValueOnce(emptyStream())
         .mockResolvedValueOnce(emptyStream())
         .mockResolvedValueOnce(emptyStream());
       vi.stubGlobal('fetch', fetchMock);
@@ -760,7 +761,8 @@ describe('DualModelDmSession', () => {
 
       expect((callbacks.onError as any).mock.calls[0][0].friendly).toMatch(/returned nothing/i);
       expect(callbacks.onTurnComplete).not.toHaveBeenCalled();
-      expect(fetchMock).toHaveBeenCalledTimes(4); // one retry, not an endless loop
+      // 2 referee + 3 narrator attempts (initial + NARRATOR_EMPTY_RETRIES), then stop.
+      expect(fetchMock).toHaveBeenCalledTimes(5);
     });
 
     it('breaks a stream that opens and then goes silent, instead of hanging the turn forever', async () => {

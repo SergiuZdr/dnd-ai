@@ -415,7 +415,14 @@ describe('GameController interactive player dice rolls', () => {
       }
     });
 
-    it('does NOT add the recovery entry once the story has content', () => {
+    // Mid-campaign failures used to write nothing durable, which cost the
+    // player twice: the error vanished on reload (leaving their action sitting
+    // there unanswered and unexplained), and start('resume') kept reading that
+    // trailing player line as "the DM never replied" and re-sending it -- so
+    // every reopen silently spent another turn of a 50/day free quota on a turn
+    // that had already failed. Both now get a persisted note, worded for where
+    // it happened.
+    it('records a failure mid-campaign too, worded for a turn that did not go through', () => {
       const cb = makeCallbacks();
       const controller = new GameController(makeState(), cb);
       // Any successful narration first -> this is no longer the opening turn.
@@ -425,8 +432,12 @@ describe('GameController interactive player dice rolls', () => {
         new DmError('unknown', 'boom', 'The weave falters.'),
       );
 
-      expect(cb.onStoryAppend).not.toHaveBeenCalled();
       expect(cb.onSystemNote).toHaveBeenCalledWith('The weave falters.');
+      const appended = (cb.onStoryAppend as any).mock.calls[0][0];
+      expect(appended.kind).toBe('system');
+      expect(appended.text).toContain('The weave falters.');
+      expect(appended.text).toMatch(/did not go through/i);
+      expect(appended.text).not.toMatch(/opening scene/i); // that wording is for the empty-story case
     });
   });
 });

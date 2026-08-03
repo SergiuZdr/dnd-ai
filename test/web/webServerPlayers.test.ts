@@ -69,22 +69,38 @@ async function start(): Promise<void> {
 }
 
 /** Reads SSE events off a live stream for `ms`, then aborts and returns the raw text. */
-async function collectSse(code: string, ms = 250): Promise<string> {
+/**
+ * Reads an SSE stream until `until` is satisfied, or the deadline passes.
+ *
+ * The previous version raced every reader.read() against a fresh 60ms timer
+ * and dropped the chunk whenever the timer won -- so a frame that arrived a
+ * few milliseconds late was silently thrown away and the assertion failed
+ * about one run in three. The deadline is now created ONCE (a real overall
+ * budget, not a per-chunk one) and reads are awaited whole, so nothing is
+ * discarded mid-stream. Assertions about content ARRIVING should pass `until`
+ * and finish the moment it does; assertions about content NOT arriving leave
+ * it unset and spend the full window, which is exactly what they need.
+ */
+async function collectSse(code: string, ms = 250, until?: (text: string) => boolean): Promise<string> {
   const ac = new AbortController();
   const res = await fetch(`${baseUrl}/api/events?pin=${encodeURIComponent(code)}`, { signal: ac.signal });
   const reader = res.body!.getReader();
   let text = '';
-  const stop = Date.now() + ms;
+  const deadline = new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), ms));
   try {
-    while (Date.now() < stop) {
-      const chunk = await Promise.race([
-        reader.read(),
-        new Promise<{ value: undefined; done: true }>((r) => setTimeout(() => r({ value: undefined, done: true }), 60)),
-      ]);
-      if (chunk.value) text += new TextDecoder().decode(chunk.value);
+    for (;;) {
+      const next = await Promise.race([reader.read(), deadline]);
+      if (next === 'timeout' || next.done) break;
+      if (next.value) text += new TextDecoder().decode(next.value);
+      if (until?.(text)) break;
     }
   } finally {
     ac.abort();
+    try {
+      reader.releaseLock();
+    } catch {
+      // already released by abort
+    }
   }
   return text;
 }
@@ -301,7 +317,7 @@ describe('SSE isolation (the leak this refactor exists to close)', () => {
     await post('/api/continue', alice.code, { slug: 'alice-camp' });
     const controller = controllers[0];
 
-    const stream = collectSse(alice.code, 300);
+    const stream = collectSse(alice.code, 3000, (t) => t.includes('HER OWN NARRATION'));
     await new Promise((r) => setTimeout(r, 60));
     controller.cb.onStoryAppend({ id: 1, kind: 'dm', text: 'HER OWN NARRATION' });
     expect(await stream).toContain('HER OWN NARRATION');
