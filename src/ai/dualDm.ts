@@ -95,6 +95,16 @@ export const STREAM_STALL_TIMEOUT_MS = 90_000;
 const NARRATOR_EMPTY_RETRIES = 2;
 
 /**
+ * Wall-clock budget for the referee's whole tool loop, separate from maxSteps.
+ * A step cap bounds how many round trips a turn may make, not how long they
+ * take -- and a live combat turn on free models spent over ten minutes making
+ * legitimate, non-stalled progress through them. Past this the loop stops
+ * adding steps and hands whatever it has to the narrator, so a turn ends in
+ * minutes rather than whenever the model runs out of things to do.
+ */
+export const REFEREE_BUDGET_MS = 180_000;
+
+/**
  * Words a referee beat sheet uses when an enemy stops fighting. Kept to plain,
  * unambiguous outcome verbs -- "wounded", "bleeding", "staggered" are all
  * deliberately absent, because a foe who is merely hurt has not been defeated
@@ -499,8 +509,22 @@ export class DualModelDmSession {
     this.retriedEmptyTurn = false;
     this.retriedMissingConsequence = false;
 
+    const refereeDeadline = Date.now() + REFEREE_BUDGET_MS;
+
     for (let step = 0; step < this.maxSteps; step++) {
       if (this.closed) return undefined;
+
+      // The step cap alone is not a time bound. Each step is its own round
+      // trip, and on free models a round trip can take a minute -- a live
+      // combat turn spent over ten minutes working through steps, none of them
+      // stalled (the silence watchdog never fired, because the model was
+      // genuinely answering). Ten minutes for one turn is a broken game
+      // whatever the cause, so the loop also stops adding steps once the turn
+      // has spent its budget, and narrates what it has.
+      if (step > 0 && Date.now() > refereeDeadline) {
+        this.callbacks.onSystemNote?.('(the DM took too long deliberating — wrapping up the turn)');
+        return { beatSheet, outcomes };
+      }
 
       const abortController = new AbortController();
       this.abortController = abortController;
