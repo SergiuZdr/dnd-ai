@@ -593,7 +593,7 @@ describe('GameController resume: show-and-wait vs. send-immediately', () => {
   }
 
   function startResume(
-    tailEntries: Array<{ role: 'player' | 'dm'; text: string }>,
+    tailEntries: Array<{ role: 'player' | 'dm' | 'system'; text: string }>,
   ): { controller: GameController; cb: ControllerCallbacks; session: RecordingSession; baseDir: string } {
     const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-resume-contract-'));
     const state = makeState();
@@ -613,6 +613,36 @@ describe('GameController resume: show-and-wait vs. send-immediately', () => {
 
     return { controller, cb, session, baseDir };
   }
+
+  // The quota burn: a failed turn leaves the player's line last, resume reads
+  // that as "the DM never replied" and re-sends it -- so every reopen spent
+  // another turn on a turn that had already failed. handleError now records a
+  // system line, and that is what has to stop the re-send.
+  it('does NOT re-send a player action that a recorded failure already answered', () => {
+    const { cb, session, baseDir } = startResume([
+      { role: 'player', text: 'I strike the bandit.' },
+      { role: 'system', text: 'The weave is exhausted.\n\nThat turn did not go through, so nothing in the story changed.' },
+    ]);
+    try {
+      expect(session.sentMessages).toHaveLength(0);
+      expect(cb.onBusyChange).toHaveBeenLastCalledWith(false);
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  // ...but a genuine "quit right after acting" must still be picked up.
+  it('still recovers an unanswered action when nothing responded to it at all', () => {
+    const { session, baseDir } = startResume([
+      { role: 'dm', text: 'The square is quiet.' },
+      { role: 'player', text: 'I draw my blade.' },
+    ]);
+    try {
+      expect(session.sentMessages).toHaveLength(1);
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
 
   it('resume with a DM-terminated tail does NOT send to the session and leaves busy false', () => {
     const { cb, session, baseDir } = startResume([
