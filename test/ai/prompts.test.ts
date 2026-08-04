@@ -48,12 +48,26 @@ function tEntry(role: TranscriptEntry['role'], text: string): TranscriptEntry {
 }
 
 describe('dmSystemPrompt', () => {
-  it('states the narration-length rule: default short, dramatic peaks only exception, never recap', () => {
+  // The length rule is a default that must YIELD to a scene the player chose to
+  // stay in. It used to read as a hard ceiling, which flatly contradicted the R
+  // clause's "write explicit scenes in full, no cutaway" -- and the ceiling won:
+  // every intimate turn came back at ~90 words, stopping at the threshold to ask
+  // "What do you do?". A more permissive model would not have fixed that.
+  it('states the narration-length rule as a default that yields, not a ceiling', () => {
     const prompt = dmSystemPrompt('PG-13');
     expect(prompt).toMatch(/1-2 short paragraphs/);
     expect(prompt).toContain('60-120 words');
-    expect(prompt).toMatch(/dramatic peaks/);
+    expect(prompt).toMatch(/DEFAULT, not a ceiling/);
+    expect(prompt).toMatch(/the length it actually deserves/);
     expect(prompt).toMatch(/[Nn]ever recap what the player just said/);
+  });
+
+  it('does not let the length rule contradict the R clause in the narrator', () => {
+    const r = narratorSystemPrompt('R');
+    expect(r).toMatch(/length guidance above does not override this/i);
+    expect(r).toMatch(/earns a long turn/i);
+    // PG-13 keeps its own ceiling untouched -- this exception is not a licence there.
+    expect(narratorSystemPrompt('PG-13')).not.toMatch(/earns a long turn/i);
   });
 
   it('instructs a short 3-6 word roll_dice reason, never a full sentence (bug fix: long reasons pushed the roll result off screen)', () => {
