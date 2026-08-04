@@ -310,7 +310,7 @@ export function buildContextBrief(
   const stateJson = JSON.stringify({ character: state.character, world: state.world }, null, 1);
 
   const exchangeLines = transcript
-    .filter((entry) => entry.role !== 'system')
+    .filter((entry) => entry.role === 'player' || entry.role === 'dm')
     .map((entry) => `${entry.role === 'player' ? 'PLAYER' : 'DM'}: ${entry.text}`);
 
   // Take from the end, dropping oldest whole entries until we fit BOTH the

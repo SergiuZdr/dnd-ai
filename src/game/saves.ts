@@ -30,7 +30,8 @@ export interface CampaignListing {
 }
 
 export interface TranscriptEntry {
-  role: 'player' | 'dm' | 'system';
+  /** 'roll' is a dice result, recorded in story order so it stays where it happened. Excluded from everything the DM reads -- the engine's roll message is already in its tool results. */
+  role: 'player' | 'dm' | 'system' | 'roll';
   text: string;
   ts: string;
 }
@@ -41,7 +42,7 @@ const envelopeSchema = z.object({
 });
 
 const transcriptEntrySchema = z.object({
-  role: z.enum(['player', 'dm', 'system']),
+  role: z.enum(['player', 'dm', 'system', 'roll']),
   text: z.string(),
   ts: z.string(),
 });

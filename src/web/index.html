@@ -565,7 +565,7 @@
   .loot-levelup { color: var(--brass-bright); font-family: var(--font-display); letter-spacing: 0.1em; margin-top: 5px; font-size: 1.05rem; text-transform: uppercase; }
   .loot-loss { color: var(--parchment-dim); font-size: 0.78rem; margin-top: 5px; }
 
-  .dice-line { padding: 2px 20px 6px; min-height: 1.2em; font-size: 0.82rem; color: var(--brass); font-family: var(--font-mono); text-align: center; max-width: 680px; width: 100%; margin: 0 auto; }
+  .entry-roll { font-size: 0.82rem; color: var(--brass); font-family: var(--font-mono); text-align: center; margin: 10px auto; opacity: 0.9; }
 
   /* ---- suggested actions ----
      Shares the feed's 680px measure so the chips line up under the prose they
@@ -1200,7 +1200,6 @@
       <div class="reconnect-pill hidden" id="reconnect-pill">reconnecting…</div>
 
       <div class="feed" id="feed"></div>
-      <div class="dice-line" id="dice-line"></div>
 
       <div class="thinking-row hidden" id="thinking-row" aria-live="polite">
         <span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -1285,7 +1284,6 @@
     suggestRow: document.getElementById('suggest-row'),
     thinkingRow: document.getElementById('thinking-row'),
     feed: document.getElementById('feed'),
-    diceLine: document.getElementById('dice-line'),
     slashBtn: document.getElementById('slash-btn'),
     slashMenu: document.getElementById('slash-menu'),
     retireBtn: document.getElementById('retire-btn'),
@@ -1684,7 +1682,6 @@
       }
       renderFeed(true);
       renderTopbar();
-      renderDiceLine();
       renderRollSheet();
       renderInputState();
       // From the snapshot, so a phone that locked and reconnected mid-scene gets
@@ -1720,11 +1717,6 @@
     evtSource.addEventListener('state', function (e) {
       session.state = JSON.parse(e.data);
       renderTopbar();
-    });
-
-    evtSource.addEventListener('dice', function (e) {
-      session.diceMessage = JSON.parse(e.data).message;
-      renderDiceLine();
     });
 
     evtSource.addEventListener('suggest', function (e) {
@@ -1889,6 +1881,7 @@
   function entryClass(kind) {
     if (kind === 'player') return 'entry entry-player';
     if (kind === 'system') return 'entry entry-system';
+    if (kind === 'roll') return 'entry entry-roll';
     return 'entry entry-dm';
   }
 
@@ -2075,12 +2068,6 @@
   els.topbarToggle.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDrawer(); }
   });
-
-  // ---------------------------------------------------------------- dice line (idle, non-interactive rolls)
-
-  function renderDiceLine() {
-    els.diceLine.textContent = (session && session.diceMessage) || '';
-  }
 
   // ---------------------------------------------------------------- input bar
 

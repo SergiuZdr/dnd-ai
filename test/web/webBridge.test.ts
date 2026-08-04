@@ -56,7 +56,6 @@ describe('GameBridge.hello', () => {
       state: null,
       busy: false,
       pendingRoll: null,
-      diceMessage: '',
       suggestions: [],
     });
   });
@@ -89,7 +88,10 @@ describe('GameBridge.hello', () => {
     expect(snapshot.state).toEqual({ character: state.character, world: state.world });
     expect(snapshot.busy).toBe(true);
     expect(snapshot.pendingRoll).toEqual({ expr: 'd20', reason: 'Persuasion', dc: 13 });
-    expect(snapshot.diceMessage).toBe('🎲 d20 (Persuasion) → [14] = 14 vs DC 13 — ✓ success');
+    // No diceMessage in the snapshot any more: a roll reaches the client as a
+    // 'roll' story entry in sequence, so a reconnect cannot resurrect the last
+    // roll and pin it under the input long after that scene ended.
+    expect(snapshot).not.toHaveProperty('diceMessage');
   });
 
   it('resets everything on detach(), and attach() again starts fresh (no leaked entries/state from the old session)', () => {
@@ -106,7 +108,6 @@ describe('GameBridge.hello', () => {
       state: null,
       busy: false,
       pendingRoll: null,
-      diceMessage: '',
       suggestions: [],
     });
 
@@ -169,10 +170,16 @@ describe('GameBridge SSE fan-out', () => {
     const unsubscribeB = bridge.subscribe((evt) => clientB.push(evt));
     expect(bridge.clientCount).toBe(2);
 
+    // onDiceRoll is intentionally inert on the bridge now -- the roll reaches
+    // the client as a 'roll' story entry, in sequence, rather than as a
+    // separate event that also had to be mirrored into snapshot state.
     cb.onDiceRoll('🎲 d20 → 10');
+    expect(clientA).toHaveLength(0);
+
+    cb.onStoryAppend({ id: 7, kind: 'roll', text: '🎲 d20 → 10' });
     expect(clientA).toHaveLength(1);
     expect(clientB).toHaveLength(1);
-    expect(clientA[0]).toEqual({ event: 'dice', data: { message: '🎲 d20 → 10' } });
+    expect(clientA[0]).toEqual({ event: 'story', data: { id: 7, kind: 'roll', text: '🎲 d20 → 10' } });
     expect(clientB[0]).toEqual(clientA[0]);
 
     unsubscribeB();
@@ -201,7 +208,6 @@ describe('GameBridge SSE fan-out', () => {
       'story',
       'stream',
       'state',
-      'dice',
       'busy',
       'note',
       'roll',
@@ -210,11 +216,10 @@ describe('GameBridge SSE fan-out', () => {
     expect(events[0].data).toEqual({ id: 1, kind: 'dm', text: 'Hello.' });
     expect(events[1].data).toEqual({ text: 'partial text' });
     expect(events[2].data).toEqual({ character: state.character, world: state.world });
-    expect(events[3].data).toEqual({ message: '🎲 d20 → 12' });
-    expect(events[4].data).toEqual({ busy: true });
-    expect(events[5].data).toEqual({ text: 'A note.' });
-    expect(events[6].data).toEqual({ expr: 'd20', reason: 'test' });
-    expect(events[7].data).toEqual({ entries: [{ id: 2, kind: 'player', text: 'replayed' }] });
+    expect(events[3].data).toEqual({ busy: true });
+    expect(events[4].data).toEqual({ text: 'A note.' });
+    expect(events[5].data).toEqual({ expr: 'd20', reason: 'test' });
+    expect(events[6].data).toEqual({ entries: [{ id: 2, kind: 'player', text: 'replayed' }] });
   });
 });
 
@@ -313,7 +318,6 @@ describe('GameBridge ledger events (onLedgerGain -> "ledger" SSE event)', () => 
       'state',
       'busy',
       'pendingRoll',
-      'diceMessage',
       'suggestions',
     ]);
   });

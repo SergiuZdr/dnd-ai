@@ -98,7 +98,11 @@ export function App({ debug = false }: AppProps = {}) {
     const controller = new GameController(
       state,
       {
-        onStoryAppend: (entry) => setEntries((prev) => [...prev, entry]),
+        // 'roll' entries are skipped here: the terminal shows rolls in its own
+        // always-mounted DiceLine card (a fixed layout suits a TUI), so letting
+        // them into the log too would print every roll twice. The web client has
+        // no such card and renders them inline instead.
+        onStoryAppend: (entry) => setEntries((prev) => (entry.kind === 'roll' ? prev : [...prev, entry])),
         onStreamText: (text) => setPartial(text),
         onStateChange: (nextState) => {
           stateRef.current = nextState;
@@ -111,7 +115,7 @@ export function App({ debug = false }: AppProps = {}) {
         // Fires once, synchronously, before start() sends anything to the DM
         // on resume/new-hero -- replaces the setEntries([]) above with the
         // player's actual prior scene instead of leaving the log blank.
-        onHistoryReplay: (replayed) => setEntries((prev) => [...prev, ...replayed]),
+        onHistoryReplay: (replayed) => setEntries((prev) => [...prev, ...replayed.filter((e) => e.kind !== 'roll')]),
       },
       { debug },
     );
