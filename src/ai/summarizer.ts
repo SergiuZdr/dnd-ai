@@ -33,7 +33,7 @@ const STORY_MARKER = 'STORY SO FAR:';
 export function buildSummarizerPrompt(chunk: TranscriptEntry[], storySoFar: string): string {
   const rollup = storySoFar || '(none yet — the campaign just started)';
   const entriesText = chunk
-    .filter((entry) => entry.role !== 'system')
+    .filter((entry) => entry.role === 'player' || entry.role === 'dm')
     .map((entry) => `${entry.role === 'player' ? 'PLAYER' : 'DM'}: ${entry.text}`)
     .join('\n');
 

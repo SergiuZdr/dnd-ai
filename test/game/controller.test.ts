@@ -15,6 +15,7 @@ import { GameController } from '../../src/game/controller';
 import type { ControllerCallbacks, DmSessionLike, StoryEntry } from '../../src/game/controller';
 import type { GameState } from '../../src/game/state';
 import { loadGame, appendTranscript, readTranscript } from '../../src/game/saves';
+import { buildContextBrief } from '../../src/ai/prompts';
 import type { DmSessionCallbacks } from '../../src/ai/dm';
 import { Engine } from '../../src/game/engine';
 import type { EngineResult } from '../../src/game/engine';
@@ -580,6 +581,53 @@ describe('GameController history replay on resume', () => {
  * pending action must not be silently dropped, so resume sends the brief
  * immediately in that case, same as the old behavior.
  */
+/**
+ * A dice result belongs at the point in the scene where it was rolled, and it
+ * has to stay there. The web client used to get rolls only as a strip pinned
+ * under the input showing the LATEST one, which meant a roll sat there for
+ * turns after the scene that produced it had ended, attached to nothing.
+ */
+describe('dice rolls as story entries', () => {
+  function rollThrough(controller: GameController, message: string): void {
+    (controller as unknown as { appendRollEntry: (m: string) => void }).appendRollEntry(message);
+  }
+
+  it('appends the roll to the story and persists it in transcript order', () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dnd-roll-entry-'));
+    try {
+      const state = makeState();
+      const cb = makeCallbacks();
+      const controller = new GameController(state, cb, { baseDir });
+
+      rollThrough(controller, '🎲 d20+2 (Attack) → [18]+2 = 20 vs DC 12 — ✓ success');
+
+      expect(cb.onStoryAppend).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'roll', text: expect.stringContaining('d20+2') }),
+      );
+      const written = readTranscript(state.campaign.slug, baseDir);
+      expect(written).toHaveLength(1);
+      expect(written[0].role).toBe('roll');
+      expect(written[0].text).toContain('✓ success');
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps rolls out of the DM context brief -- the DM already saw them as tool results', () => {
+    const state = makeState();
+    const transcript = [
+      { role: 'player' as const, text: 'I swing at the bandit.', ts: 't0' },
+      { role: 'roll' as const, text: '🎲 d20+2 (Attack) → [18]+2 = 20 vs DC 12 — ✓ success', ts: 't1' },
+      { role: 'dm' as const, text: 'Your blade bites deep.', ts: 't2' },
+    ];
+    const brief = buildContextBrief(state, transcript);
+    expect(brief).toContain('I swing at the bandit.');
+    expect(brief).toContain('Your blade bites deep.');
+    expect(brief).not.toContain('🎲');
+    expect(brief).not.toContain('vs DC 12');
+  });
+});
+
 describe('GameController resume: show-and-wait vs. send-immediately', () => {
   class RecordingSession implements DmSessionLike {
     sentMessages: string[] = [];

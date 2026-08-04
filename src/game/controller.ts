@@ -37,7 +37,8 @@ import { loadSettings } from './settings';
 
 export interface StoryEntry {
   id: number;
-  kind: 'player' | 'dm' | 'system';
+  /** 'roll' renders as a dice line inline in the feed, at the point in the scene where the roll actually happened. */
+  kind: 'player' | 'dm' | 'system' | 'roll';
   text: string;
 }
 
@@ -292,7 +293,15 @@ export class GameController {
     const { server, allowedTools, tools } = createDmTools(engine, {
       onToolResult: (name, result) => {
         if (name === 'roll_dice' && result.ok) {
+          // Two destinations on purpose. onDiceRoll feeds the ink TUI's fixed
+          // always-mounted dice card, which is right for a terminal's static
+          // layout. The web feed instead gets the roll as a STORY ENTRY, in
+          // sequence, so it lands at the point in the scene where the roll
+          // actually happened and stays there -- the old web treatment pinned
+          // only the latest roll to a strip under the input, where it sat for
+          // turns afterwards attached to nothing.
           this.cb.onDiceRoll(result.message);
+          this.appendRollEntry(result.message);
         }
         if (result.ok && result.events.includes('hp-zero')) {
           this.cb.onSystemNote(
@@ -383,7 +392,7 @@ export class GameController {
     // unasked would just spend another turn's quota on the same thing.
     const lastEntry = [...unsummarized]
       .reverse()
-      .find((entry) => entry.role === 'player' || entry.role === 'dm' || entry.role === 'system');
+      .find((entry) => entry.role === 'player' || entry.role === 'dm' || entry.role === 'system' || entry.role === 'roll');
     if (lastEntry?.role === 'player') {
       this.setBusy(true);
       this.session.send(brief);
@@ -560,6 +569,23 @@ export class GameController {
   private setBusy(busy: boolean): void {
     this.busy = busy;
     this.cb.onBusyChange(busy);
+  }
+
+  /**
+   * Puts a dice result into the story where it happened, and persists it, so
+   * it survives a reload and replays in the right place rather than vanishing.
+   * Written as its own 'roll' role: buildContextBrief and the summarizer both
+   * take player/dm lines only, so these never reach the DM -- it already saw
+   * the roll as a tool result, and feeding the formatted line back would just
+   * spend context restating it.
+   */
+  private appendRollEntry(message: string): void {
+    this.cb.onStoryAppend({ id: this.nextStoryId++, kind: 'roll', text: message });
+    appendTranscript(
+      this.state.campaign.slug,
+      { role: 'roll', text: message, ts: new Date().toISOString() },
+      this.baseDir,
+    );
   }
 
   /** The ToolHooks.interactiveRoll implementation: parks the tool call's promise until confirmRoll()/resolvePendingRoll() settles it. */

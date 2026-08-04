@@ -31,7 +31,6 @@ export interface HelloSnapshot {
   state: SanitizedState | null;
   busy: boolean;
   pendingRoll: PendingRollRequest | null;
-  diceMessage: string;
   /**
    * Unlike the transient 'note'/'ledger' events, suggestions ARE part of the
    * current scene: a phone that locks and reconnects mid-scene must get its
@@ -61,7 +60,6 @@ export class GameBridge {
   private state: GameState | null = null;
   private busy = false;
   private pendingRoll: PendingRollRequest | null = null;
-  private diceMessage = '';
   private suggestions: string[] = [];
   /** Counts DOWN (like App.tsx's systemIdRef for the TUI) so locally-synthesized entries (appendSystemNote) never collide with the controller's own positive, incrementing StoryEntry ids. */
   private systemIdCounter = 0;
@@ -86,7 +84,6 @@ export class GameBridge {
     this.state = null;
     this.busy = false;
     this.pendingRoll = null;
-    this.diceMessage = '';
     this.suggestions = [];
     this.systemIdCounter = 0;
 
@@ -102,10 +99,12 @@ export class GameBridge {
         this.state = state;
         this.broadcast({ event: 'state', data: sanitizeState(state) });
       },
-      onDiceRoll: (message) => {
-        this.diceMessage = message;
-        this.broadcast({ event: 'dice', data: { message } });
-      },
+      // Deliberately does nothing here: the roll already reaches the client
+      // as a 'roll' STORY ENTRY via onStoryAppend, in sequence, so it lands
+      // where it happened and stays there. Mirroring it into snapshot state as
+      // well is what used to leave the newest roll pinned under the input for
+      // turns after the scene had moved on.
+      onDiceRoll: () => {},
       onBusyChange: (busy) => {
         this.busy = busy;
         this.broadcast({ event: 'busy', data: { busy } });
@@ -148,7 +147,6 @@ export class GameBridge {
     this.state = null;
     this.busy = false;
     this.pendingRoll = null;
-    this.diceMessage = '';
     this.suggestions = [];
     this.systemIdCounter = 0;
   }
@@ -183,7 +181,6 @@ export class GameBridge {
       state: this.state ? sanitizeState(this.state) : null,
       busy: this.busy,
       pendingRoll: this.pendingRoll,
-      diceMessage: this.diceMessage,
       suggestions: [...this.suggestions],
     };
   }
