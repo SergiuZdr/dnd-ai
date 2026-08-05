@@ -657,6 +657,102 @@ describe('DualModelDmSession', () => {
       expect(fetchMock).toHaveBeenCalledTimes(3); // 2 referee + 1 narrator, no nudge
     });
 
+    // The loot half, from a live campaign: the DM unlocked a strongbox and
+    // narrated "thirty glinting gold pieces", then twenty more, plus a key, a
+    // satchel and a map -- and the hero's sheet still read 15 gold, rapier and
+    // lute. Nothing had been called.
+    it('fires when a search succeeds but nothing enters the hero\'s possession', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          sseResponse([
+            toolCallChunk('roll_dice', '{"expr":"d20+2","reason":"Unlock strongbox with key","dc":10,"roller":"dm"}'),
+            { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([
+            { choices: [{ delta: { content: 'The box opens. Inside, a satchel of thirty gold and a map.' } }] },
+            { choices: [{ delta: {}, finish_reason: 'stop' }] },
+          ]),
+        )
+        // After the nudge the loot finally lands.
+        .mockResolvedValueOnce(
+          sseResponse([toolCallChunk('award_gold', '{"amount":30,"reason":"strongbox satchel"}'), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'Thirty gold recorded.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'The lid swings open.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      vi.spyOn(Math, 'random').mockReturnValue(0.99);
+      const { engine, session, callbacks } = makeSession();
+      session.start();
+      session.send('I unlock the strongbox.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect(engine.state.character.gold).toBe(40); // 10 starting + 30
+    });
+
+    it('stays quiet when the loot was already recorded', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          sseResponse([
+            toolCallChunk('roll_dice', '{"expr":"d20","reason":"Search the body","dc":10,"roller":"dm"}'),
+            { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([toolCallChunk('add_item', '{"name":"Iron key","qty":1}'), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'Key found.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'Your fingers close on a key.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      vi.spyOn(Math, 'random').mockReturnValue(0.99);
+      const { engine, session, callbacks } = makeSession();
+      session.start();
+      session.send('I search the body.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect(engine.state.character.inventory).toEqual([{ name: 'Iron key', qty: 1 }]);
+      expect(fetchMock).toHaveBeenCalledTimes(4); // 3 referee + 1 narrator, no nudge
+    });
+
+    it('does not fire when the search failed -- an empty search is a real outcome', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          sseResponse([
+            toolCallChunk('roll_dice', '{"expr":"d20","reason":"Search strongbox contents","dc":12,"roller":"dm"}'),
+            { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'Nothing else inside.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'Your hands find nothing.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      vi.spyOn(Math, 'random').mockReturnValue(0); // d20 -> 1, a certain failure
+      const { session, callbacks } = makeSession();
+      session.start();
+      session.send('I search the box again.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect(fetchMock).toHaveBeenCalledTimes(3); // no nudge
+    });
+
     it('does not mistake the hero going down for a victory', async () => {
       const fetchMock = vi
         .fn()
