@@ -208,7 +208,7 @@ function succeededWithLabel(outcomes: ToolOutcomeRecord[], labelRe: RegExp): boo
  * that genuinely turned up nothing is a real outcome, and pressuring the model
  * to invent loot to satisfy a nudge would be a worse bug than the one it fixes.
  */
-export function buildMissingConsequencePrompt(combat: boolean, loot: boolean): string {
+export function buildMissingConsequencePrompt(combat: boolean, loot: boolean, purchase = false): string {
   const parts: string[] = [
     'You are about to end this turn without recording something it resolved. What the player sees is ONLY what the tools record, so an unrecorded outcome did not happen. Before you finish:',
   ];
@@ -222,8 +222,13 @@ export function buildMissingConsequencePrompt(combat: boolean, loot: boolean): s
       '- A SEARCH, LOCKPICK, THEFT or the like SUCCEEDED, and nothing entered the hero\'s possession. If they now hold coin, call award_gold with the amount. If they now hold an object -- a key, a map, a satchel, a weapon, a letter -- call add_item for EACH one, by name. Describing "thirty gold pieces" or "a faded map" without these calls means the hero walks away with an unchanged purse and an empty pack, and the next turn will contradict this one.',
     );
   }
+  if (purchase) {
+    parts.push(
+      '- The hero PAID GOLD and gained no item. If they bought goods, call add_item for each thing they walked out with, by name -- paying for a lantern and a coil of rope and then not having them leaves the player strictly worse off for shopping, which is the most obviously broken thing this game can do.',
+    );
+  }
   parts.push(
-    'If nothing actually changed hands and nobody was hurt or defeated -- the search came up empty, the blow glanced off -- that is a legitimate outcome: call nothing and reply with your beat sheet again.',
+    'If nothing actually changed hands and nobody was hurt or defeated -- the search came up empty, the blow glanced off, the coin bought a room or a bribe rather than an object -- that is a legitimate outcome: call nothing and reply with your beat sheet again.',
   );
   return parts.join('\n');
 }
@@ -705,14 +710,23 @@ export class DualModelDmSession {
       const lootUnrecorded =
         foundSomething(outcomes) &&
         !outcomes.some((o) => (o.tool === 'add_item' || o.tool === 'award_gold' || o.tool === 'remove_item') && o.ok);
+      // Gold left the hero and nothing arrived. Needs no roll and no prose
+      // matching -- a live purchase charged 13 gold for "a sturdy lantern, a
+      // coil of rope, and a compact bedroll" and added none of them, leaving
+      // the player strictly poorer for shopping. Plenty of spends buy no
+      // object at all (a room, a bribe, a toll), so this one leans hardest on
+      // being declinable.
+      const purchaseUnrecorded =
+        outcomes.some((o) => o.tool === 'spend_gold' && o.ok) &&
+        !outcomes.some((o) => o.tool === 'add_item' && o.ok);
 
-      if (!this.retriedMissingConsequence && (combatUnrecorded || lootUnrecorded)) {
+      if (!this.retriedMissingConsequence && (combatUnrecorded || lootUnrecorded || purchaseUnrecorded)) {
         this.retriedMissingConsequence = true;
         // Server-side only: whether this nudge fires (and whether it works) is
         // otherwise invisible, and it is the one guardrail standing between a
         // won fight and 0 XP, or a looted strongbox and an unchanged purse.
         console.error(
-          `[referee] turn ending with unrecorded ${[combatUnrecorded && 'combat', lootUnrecorded && 'loot'].filter(Boolean).join('+')} — nudging once`,
+          `[referee] turn ending with unrecorded ${[combatUnrecorded && 'combat', lootUnrecorded && 'loot', purchaseUnrecorded && 'purchase'].filter(Boolean).join('+')} — nudging once`,
         );
         this.refereeMessages.push({
           role: 'assistant',
@@ -720,7 +734,7 @@ export class DualModelDmSession {
         });
         this.refereeMessages.push({
           role: 'user',
-          content: buildMissingConsequencePrompt(combatUnrecorded, lootUnrecorded),
+          content: buildMissingConsequencePrompt(combatUnrecorded, lootUnrecorded, purchaseUnrecorded),
         });
         continue;
       }
