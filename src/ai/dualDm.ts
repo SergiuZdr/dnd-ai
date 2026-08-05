@@ -124,6 +124,22 @@ const FOE_DOWN_RE =
  */
 const ATTACK_LABEL_RE = /\b(attack|shot|shoot|strike|swing|stab|slash|thrust|fire[sd]?|loose[sd]?|arrow|blade|blow|melee|ranged)\b/i;
 
+/**
+ * Labels the referee gives a roll when the hero is trying to GET something --
+ * searching a room, forcing a lock, picking a pocket, rifling a body. A
+ * successful roll like this is the moment loot enters the fiction, and the
+ * second half of the same failure the combat check exists for: in a live
+ * campaign the DM opened a strongbox, narrated "thirty glinting gold pieces",
+ * then twenty more, plus a key, a satchel and a map -- and the hero's sheet
+ * still read 15 gold and a starting rapier and lute. Nothing had been called.
+ */
+const LOOT_LABEL_RE =
+  /\b(search|searching|loot|looting|ransack|rummage|scavenge|forage|pilfer|plunder|lockpick|pickpocket|steal|stealing|swipe|unlock|strongbox|lockbox|coffer|chest|satchel|strongroom|vault)\b/i;
+// Deliberately NOT here: "force", "open", "pry", "examine", "inspect". Forcing
+// or opening a door yields no loot, and examining something the hero already
+// holds yields nothing new -- an early version included them and immediately
+// fired on a plain "Force the door" check.
+
 type ToolMessageCall = { id: string; type: 'function'; function: { name: string; arguments: string } };
 
 type RefereeMessage =
@@ -166,12 +182,50 @@ export interface ToolOutcomeRecord {
  * attack at all.
  */
 export function landedAnAttack(outcomes: ToolOutcomeRecord[]): boolean {
+  return succeededWithLabel(outcomes, ATTACK_LABEL_RE);
+}
+
+/** True when a search/loot/steal-type roll SUCCEEDED this turn -- the moment something should have entered the hero's hands. */
+export function foundSomething(outcomes: ToolOutcomeRecord[]): boolean {
+  return succeededWithLabel(outcomes, LOOT_LABEL_RE);
+}
+
+/** Shared shape for both: the engine's own roll message carries the verdict, so the label only decides what KIND of roll it was. */
+function succeededWithLabel(outcomes: ToolOutcomeRecord[], labelRe: RegExp): boolean {
   return outcomes.some((o) => {
     if (o.tool !== 'roll_dice' || !o.ok) return false;
     if (!/success/i.test(o.resultText)) return false;
     const label = typeof o.args.reason === 'string' ? o.args.reason : '';
-    return ATTACK_LABEL_RE.test(label);
+    return labelRe.test(label);
   });
+}
+
+/**
+ * The one question the referee gets when a turn is about to end having
+ * resolved something consequential and recorded none of it. Composed from
+ * whichever halves actually triggered, so the referee is not lectured about
+ * combat on a turn that was only a burglary. Always declinable -- a search
+ * that genuinely turned up nothing is a real outcome, and pressuring the model
+ * to invent loot to satisfy a nudge would be a worse bug than the one it fixes.
+ */
+export function buildMissingConsequencePrompt(combat: boolean, loot: boolean): string {
+  const parts: string[] = [
+    'You are about to end this turn without recording something it resolved. What the player sees is ONLY what the tools record, so an unrecorded outcome did not happen. Before you finish:',
+  ];
+  if (combat) {
+    parts.push(
+      '- An attack LANDED. Did an enemy hit the HERO? Call apply_damage NOW, this turn, not next turn -- their HP bar is the only injury they can see. Did an enemy go down (killed, knocked out, driven off, surrendered)? Call defeat_foe with their name and the XP (25-100 a thug or minor beast, 150-450 a real fight, 500+ a boss).',
+    );
+  }
+  if (loot) {
+    parts.push(
+      '- A SEARCH, LOCKPICK, THEFT or the like SUCCEEDED, and nothing entered the hero\'s possession. If they now hold coin, call award_gold with the amount. If they now hold an object -- a key, a map, a satchel, a weapon, a letter -- call add_item for EACH one, by name. Describing "thirty gold pieces" or "a faded map" without these calls means the hero walks away with an unchanged purse and an empty pack, and the next turn will contradict this one.',
+    );
+  }
+  parts.push(
+    'If nothing actually changed hands and nobody was hurt or defeated -- the search came up empty, the blow glanced off -- that is a legitimate outcome: call nothing and reply with your beat sheet again.',
+  );
+  return parts.join('\n');
 }
 
 /** Renders a turn's ToolOutcomeRecord[] into the plain-text block the narrator's prompt embeds -- one line per tool call, in call order. */
@@ -642,25 +696,31 @@ export class DualModelDmSession {
       // letting a killed bandit pay no XP and once letting a landed enemy blow
       // ("the force of the blow jolting through your body") leave the HP bar
       // untouched at 7/12.
-      const consequenceMissing = !outcomes.some((o) => (o.tool === 'defeat_foe' || o.tool === 'apply_damage') && o.ok);
-      const combatHappened = this.beatSheetReportsFoeDown(beatSheet) || landedAnAttack(outcomes);
-      if (!this.retriedMissingConsequence && consequenceMissing && combatHappened) {
+      const combatUnrecorded =
+        (this.beatSheetReportsFoeDown(beatSheet) || landedAnAttack(outcomes)) &&
+        !outcomes.some((o) => (o.tool === 'defeat_foe' || o.tool === 'apply_damage') && o.ok);
+      // The loot half: a search/lockpick/pickpocket that SUCCEEDED is the
+      // moment something enters the hero's hands, and it has to enter the
+      // ledger too or the player is simply told a lie.
+      const lootUnrecorded =
+        foundSomething(outcomes) &&
+        !outcomes.some((o) => (o.tool === 'add_item' || o.tool === 'award_gold' || o.tool === 'remove_item') && o.ok);
+
+      if (!this.retriedMissingConsequence && (combatUnrecorded || lootUnrecorded)) {
         this.retriedMissingConsequence = true;
         // Server-side only: whether this nudge fires (and whether it works) is
         // otherwise invisible, and it is the one guardrail standing between a
-        // won fight and 0 XP.
-        console.error('[referee] an attack landed but nothing was recorded — nudging once');
+        // won fight and 0 XP, or a looted strongbox and an unchanged purse.
+        console.error(
+          `[referee] turn ending with unrecorded ${[combatUnrecorded && 'combat', lootUnrecorded && 'loot'].filter(Boolean).join('+')} — nudging once`,
+        );
         this.refereeMessages.push({
           role: 'assistant',
           content: stepResult.content.length > 0 ? stepResult.content : '(no beat sheet produced)',
         });
         this.refereeMessages.push({
           role: 'user',
-          content:
-            'An attack LANDED this turn and you are about to end the turn without recording what it did. A blow that connects must change something, or it did not happen at all as far as the player\'s screen is concerned. Right now, before you finish:\n' +
-            '- Did an enemy hit the HERO? Call apply_damage NOW with the damage, this turn, not next turn. Their HP bar is the only injury the player can see; prose about a blow "jolting through your body" over an unchanged HP bar is a bug they will notice immediately.\n' +
-            '- Did an enemy go down — killed, knocked out, driven off, surrendered? Call defeat_foe with their name and the XP (25-100 a thug or minor beast, 150-450 a real fight, 500+ a boss), plus award_gold / add_item for anything lootable you described. A foe you described dropping but never passed to defeat_foe is still alive as far as the game is concerned, and the fight paid nothing.\n' +
-            'If the hero was genuinely untouched and the foe is genuinely still standing, that is fine — call nothing and reply with your beat sheet again.',
+          content: buildMissingConsequencePrompt(combatUnrecorded, lootUnrecorded),
         });
         continue;
       }
