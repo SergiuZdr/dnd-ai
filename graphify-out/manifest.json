@@ -1,0 +1,437 @@
+{
+  "/Users/Sergiu/DevG/D&D AI/package.json": {
+    "mtime": 1784990658.523464,
+    "ast_hash": "3c49d9041ac7c88bc92cb71d6514bb0a",
+    "semantic_hash": "3c49d9041ac7c88bc92cb71d6514bb0a"
+  },
+  "/Users/Sergiu/DevG/D&D AI/tsconfig.json": {
+    "mtime": 1784289992.890654,
+    "ast_hash": "c8d90d2fc54f4cba573b0a17fcf3256d",
+    "semantic_hash": "c8d90d2fc54f4cba573b0a17fcf3256d"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ui/storyViewport.test.ts": {
+    "mtime": 1785412260.6102748,
+    "ast_hash": "2f2c081255f95fab615839c69340bd45",
+    "semantic_hash": "2f2c081255f95fab615839c69340bd45"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ui/diceLine.test.ts": {
+    "mtime": 1785412260.6085985,
+    "ast_hash": "bacef3f30a1c2c0973b5b98eab9de8e0",
+    "semantic_hash": "bacef3f30a1c2c0973b5b98eab9de8e0"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ui/layout.test.ts": {
+    "mtime": 1785412260.6094172,
+    "ast_hash": "1076a5d4da6d026a4421850681d8bbb4",
+    "semantic_hash": "1076a5d4da6d026a4421850681d8bbb4"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/web/webServer.test.ts": {
+    "mtime": 1785412260.6133518,
+    "ast_hash": "5f2a72c893b3a9a74f43292b1f99a901",
+    "semantic_hash": "5f2a72c893b3a9a74f43292b1f99a901"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/web/webServerPlayers.test.ts": {
+    "mtime": 1785722196.1823056,
+    "ast_hash": "641fd4b38383a49eb75fc69cb3899a0d",
+    "semantic_hash": "641fd4b38383a49eb75fc69cb3899a0d"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/web/loginField.test.ts": {
+    "mtime": 1785412260.610941,
+    "ast_hash": "c42b10c55e203fe854b0ec835ce21754",
+    "semantic_hash": "c42b10c55e203fe854b0ec835ce21754"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/web/serve.test.ts": {
+    "mtime": 1785412260.611721,
+    "ast_hash": "8108d68d67b04965657484941ccff7be",
+    "semantic_hash": "8108d68d67b04965657484941ccff7be"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/web/webBridge.test.ts": {
+    "mtime": 1785872606.929002,
+    "ast_hash": "8a786923c37298409f7b6c43618b23c2",
+    "semantic_hash": "8a786923c37298409f7b6c43618b23c2"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/game/chronicle.test.ts": {
+    "mtime": 1785412260.5996711,
+    "ast_hash": "aff6555ebdfbdbf2b5f226992e404f25",
+    "semantic_hash": "aff6555ebdfbdbf2b5f226992e404f25"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/game/saves.test.ts": {
+    "mtime": 1785412260.6059155,
+    "ast_hash": "77018a1eadf39ed74548b3c4d0325535",
+    "semantic_hash": "77018a1eadf39ed74548b3c4d0325535"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/game/players.test.ts": {
+    "mtime": 1785412260.6051135,
+    "ast_hash": "daec95fe191c44c17d8a8ba1d491ec03",
+    "semantic_hash": "daec95fe191c44c17d8a8ba1d491ec03"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/game/engine.test.ts": {
+    "mtime": 1785412260.603066,
+    "ast_hash": "5a2ee5638152cea242628a3eba218b40",
+    "semantic_hash": "5a2ee5638152cea242628a3eba218b40"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/game/newCampaign.test.ts": {
+    "mtime": 1785412260.604134,
+    "ast_hash": "50ca3ea5840d9eb0eb9c43d8b508667c",
+    "semantic_hash": "50ca3ea5840d9eb0eb9c43d8b508667c"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/game/controller.test.ts": {
+    "mtime": 1785872811.3683312,
+    "ast_hash": "9d4468461e8a5dc097c61013b41d6e0f",
+    "semantic_hash": "9d4468461e8a5dc097c61013b41d6e0f"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/game/settings.test.ts": {
+    "mtime": 1785412260.6068094,
+    "ast_hash": "9a3f799cb616ebb163617f2429b2e7b0",
+    "semantic_hash": "9a3f799cb616ebb163617f2429b2e7b0"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/game/defaultSessionFactory.test.ts": {
+    "mtime": 1785412260.6014576,
+    "ast_hash": "2d31f7251cf894877265990e1d3e3586",
+    "semantic_hash": "2d31f7251cf894877265990e1d3e3586"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/game/dice.test.ts": {
+    "mtime": 1785412260.6020858,
+    "ast_hash": "c0a67784ff4b9bfea1aa6b3fde0f3aaa",
+    "semantic_hash": "c0a67784ff4b9bfea1aa6b3fde0f3aaa"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/summarizerBackend.test.ts": {
+    "mtime": 1785079650.2931104,
+    "ast_hash": "65129cf6cffbd6f17aa00c6d971e6a8c",
+    "semantic_hash": "65129cf6cffbd6f17aa00c6d971e6a8c"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/argRepair.test.ts": {
+    "mtime": 1785708115.2018704,
+    "ast_hash": "8bb4e49601282892302da5ecec13926d",
+    "semantic_hash": "8bb4e49601282892302da5ecec13926d"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/openaiDm.test.ts": {
+    "mtime": 1785412260.5943072,
+    "ast_hash": "ad66a0bb3a4b917f5e24ac14a99c6328",
+    "semantic_hash": "ad66a0bb3a4b917f5e24ac14a99c6328"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/suggestions.test.ts": {
+    "mtime": 1785413746.0154393,
+    "ast_hash": "4f746c393ce2b9d016059b7a360ead9b",
+    "semantic_hash": "4f746c393ce2b9d016059b7a360ead9b"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/prompts.test.ts": {
+    "mtime": 1785866877.7452967,
+    "ast_hash": "227202b9c3084d18ae66b16494f6db46",
+    "semantic_hash": "227202b9c3084d18ae66b16494f6db46"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/openaiStream.test.ts": {
+    "mtime": 1785412260.5957992,
+    "ast_hash": "adaf90a47e7b3f56cffe60b208a3e8bf",
+    "semantic_hash": "adaf90a47e7b3f56cffe60b208a3e8bf"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/tools.test.ts": {
+    "mtime": 1785721990.078459,
+    "ast_hash": "de99d25a4a563412273df4825389c7be",
+    "semantic_hash": "de99d25a4a563412273df4825389c7be"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/openaiHttp.test.ts": {
+    "mtime": 1785516084.490271,
+    "ast_hash": "20ae482da709e75b825829c814cacc40",
+    "semantic_hash": "20ae482da709e75b825829c814cacc40"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/summarizer.test.ts": {
+    "mtime": 1785412260.5971398,
+    "ast_hash": "16d9ad48bed159fbf880ae5f94a01f0b",
+    "semantic_hash": "16d9ad48bed159fbf880ae5f94a01f0b"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/toolSchema.test.ts": {
+    "mtime": 1785708101.0401354,
+    "ast_hash": "2a87b24d50a3b6191bc31ce198c557f1",
+    "semantic_hash": "2a87b24d50a3b6191bc31ce198c557f1"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/dm.test.ts": {
+    "mtime": 1785412260.5923092,
+    "ast_hash": "56ba06e14a45560c6beb7f0fca23112f",
+    "semantic_hash": "56ba06e14a45560c6beb7f0fca23112f"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/ai/dualDm.test.ts": {
+    "mtime": 1785957711.223295,
+    "ast_hash": "71a3f658b2129ef63026a8546a310e34",
+    "semantic_hash": "71a3f658b2129ef63026a8546a310e34"
+  },
+  "/Users/Sergiu/DevG/D&D AI/test/scripts/saveRepair.test.ts": {
+    "mtime": 1785412260.607639,
+    "ast_hash": "0ed20dd5a9f091107cc18da7f6d6f3db",
+    "semantic_hash": "0ed20dd5a9f091107cc18da7f6d6f3db"
+  },
+  "/Users/Sergiu/DevG/D&D AI/.claude/settings.local.json": {
+    "mtime": 1784992571.5404,
+    "ast_hash": "52848f18556466d1cb5f75b2f966631c",
+    "semantic_hash": "52848f18556466d1cb5f75b2f966631c"
+  },
+  "/Users/Sergiu/DevG/D&D AI/scripts/tunnel.ts": {
+    "mtime": 1784726661.8483279,
+    "ast_hash": "d4762e09fab26abcfc13e903c4bed460",
+    "semantic_hash": "d4762e09fab26abcfc13e903c4bed460"
+  },
+  "/Users/Sergiu/DevG/D&D AI/scripts/smoke/smoke.ts": {
+    "mtime": 1784990658.6935713,
+    "ast_hash": "d99e3e4ea459179ed0a0f8f8395c288d",
+    "semantic_hash": "d99e3e4ea459179ed0a0f8f8395c288d"
+  },
+  "/Users/Sergiu/DevG/D&D AI/scripts/smoke/spike.ts": {
+    "mtime": 1784990658.697028,
+    "ast_hash": "78d0c7a7f67dc6e680b72aa5309aa94e",
+    "semantic_hash": "78d0c7a7f67dc6e680b72aa5309aa94e"
+  },
+  "/Users/Sergiu/DevG/D&D AI/scripts/smoke/dual-smoke.ts": {
+    "mtime": 1785412260.5760508,
+    "ast_hash": "200165d090a50dcbc6e48de26ff649a9",
+    "semantic_hash": "200165d090a50dcbc6e48de26ff649a9"
+  },
+  "/Users/Sergiu/DevG/D&D AI/scripts/smoke/openai-smoke.ts": {
+    "mtime": 1785412260.5777829,
+    "ast_hash": "17de933742acdcc5831604655866463b",
+    "semantic_hash": "17de933742acdcc5831604655866463b"
+  },
+  "/Users/Sergiu/DevG/D&D AI/scripts/smoke/memory-smoke.ts": {
+    "mtime": 1785412260.5769193,
+    "ast_hash": "130ccb7b5da38bc36f9df007a7672c2e",
+    "semantic_hash": "130ccb7b5da38bc36f9df007a7672c2e"
+  },
+  "/Users/Sergiu/DevG/D&D AI/scripts/admin/migrate-to-players.ts": {
+    "mtime": 1784990658.644065,
+    "ast_hash": "97006189f62a67fd8a23d62fb47d338d",
+    "semantic_hash": "97006189f62a67fd8a23d62fb47d338d"
+  },
+  "/Users/Sergiu/DevG/D&D AI/scripts/admin/players.ts": {
+    "mtime": 1784990658.647952,
+    "ast_hash": "4221cd2a4c4a05ba3670b8bcf6595ca9",
+    "semantic_hash": "4221cd2a4c4a05ba3670b8bcf6595ca9"
+  },
+  "/Users/Sergiu/DevG/D&D AI/scripts/admin/rewind.ts": {
+    "mtime": 1785412260.5751994,
+    "ast_hash": "c40b24a22100109d21e20a7cb23a1c3b",
+    "semantic_hash": "c40b24a22100109d21e20a7cb23a1c3b"
+  },
+  "/Users/Sergiu/DevG/D&D AI/scripts/admin/fix-item-names.ts": {
+    "mtime": 1785412260.5738924,
+    "ast_hash": "9a730544ea097f5083309bf33624d3ea",
+    "semantic_hash": "9a730544ea097f5083309bf33624d3ea"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/index.tsx": {
+    "mtime": 1784371415.503822,
+    "ast_hash": "49e516d3c8068a6a54970d0666de7673",
+    "semantic_hash": "49e516d3c8068a6a54970d0666de7673"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/StoryLog.tsx": {
+    "mtime": 1784371415.5226827,
+    "ast_hash": "96efcc5d97b9e825847acfad64892cca",
+    "semantic_hash": "96efcc5d97b9e825847acfad64892cca"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/App.tsx": {
+    "mtime": 1785872766.326616,
+    "ast_hash": "2dd0bff5e60b89d104746327979173d5",
+    "semantic_hash": "2dd0bff5e60b89d104746327979173d5"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/InputBar.tsx": {
+    "mtime": 1785412260.5873482,
+    "ast_hash": "54d175bf5cddca5b11c1d256873fbed7",
+    "semantic_hash": "54d175bf5cddca5b11c1d256873fbed7"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/storyViewport.ts": {
+    "mtime": 1784371415.7083826,
+    "ast_hash": "2e23e6094630605c4285e7757661989c",
+    "semantic_hash": "2e23e6094630605c4285e7757661989c"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/slashCommands.ts": {
+    "mtime": 1785412260.5882354,
+    "ast_hash": "456efe57361572337c2ab5ce5cf347b8",
+    "semantic_hash": "456efe57361572337c2ab5ce5cf347b8"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/layout.ts": {
+    "mtime": 1784421768.0096684,
+    "ast_hash": "a9982f5b3431fb4e77f64fe78cbaaeba",
+    "semantic_hash": "a9982f5b3431fb4e77f64fe78cbaaeba"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/DiceLine.tsx": {
+    "mtime": 1784710731.7820153,
+    "ast_hash": "7ef882e23f6ebad03bbca33b8ed18dd7",
+    "semantic_hash": "7ef882e23f6ebad03bbca33b8ed18dd7"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/Menu.tsx": {
+    "mtime": 1784309351.5240092,
+    "ast_hash": "291bf08e0195a7294679516be67ec7e5",
+    "semantic_hash": "291bf08e0195a7294679516be67ec7e5"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/Sidebar.tsx": {
+    "mtime": 1784371415.52011,
+    "ast_hash": "2b65f4bdb0aabac799e452f88cdb7752",
+    "semantic_hash": "2b65f4bdb0aabac799e452f88cdb7752"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/useRawModeActive.ts": {
+    "mtime": 1784309286.849217,
+    "ast_hash": "6f069e2fc8ce7b699423b74f47669af2",
+    "semantic_hash": "6f069e2fc8ce7b699423b74f47669af2"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/SelectList.tsx": {
+    "mtime": 1784371415.5172818,
+    "ast_hash": "a39f2486002f912088c60d5be8a16c1d",
+    "semantic_hash": "a39f2486002f912088c60d5be8a16c1d"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/wizard/StatsRollStep.tsx": {
+    "mtime": 1784309368.8351529,
+    "ast_hash": "3fd92a5477b0f6141c6413e9f7cb06ad",
+    "semantic_hash": "3fd92a5477b0f6141c6413e9f7cb06ad"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/wizard/Wizard.tsx": {
+    "mtime": 1784371415.52907,
+    "ast_hash": "ca54f6529e5cfc277a5a77de8985942b",
+    "semantic_hash": "ca54f6529e5cfc277a5a77de8985942b"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ui/wizard/TextPrompt.tsx": {
+    "mtime": 1784309361.088533,
+    "ast_hash": "6b3539b3da74bb50fe133a74356b2bba",
+    "semantic_hash": "6b3539b3da74bb50fe133a74356b2bba"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/web/serve.ts": {
+    "mtime": 1784987923.8921785,
+    "ast_hash": "8cd3551d520dd0df0dce3ea60fe3c7ca",
+    "semantic_hash": "8cd3551d520dd0df0dce3ea60fe3c7ca"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/web/bridge.ts": {
+    "mtime": 1785872376.3196564,
+    "ast_hash": "d3f89a529eeb9fbcb17c928576349cb9",
+    "semantic_hash": "d3f89a529eeb9fbcb17c928576349cb9"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/web/server.ts": {
+    "mtime": 1785412260.59097,
+    "ast_hash": "6a007ae09a81d16acf4db60a0b117e89",
+    "semantic_hash": "6a007ae09a81d16acf4db60a0b117e89"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/game/state.ts": {
+    "mtime": 1785708133.0692759,
+    "ast_hash": "dd03b552410e7c01da1b4b1cce3337ed",
+    "semantic_hash": "dd03b552410e7c01da1b4b1cce3337ed"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/game/settings.ts": {
+    "mtime": 1785412260.586642,
+    "ast_hash": "04df4a268a4df6608a6ba4070ffa8667",
+    "semantic_hash": "04df4a268a4df6608a6ba4070ffa8667"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/game/saves.ts": {
+    "mtime": 1785871958.713662,
+    "ast_hash": "65bc493d7ecf85d2abe70dc961aebb19",
+    "semantic_hash": "65bc493d7ecf85d2abe70dc961aebb19"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/game/players.ts": {
+    "mtime": 1784990896.3423321,
+    "ast_hash": "06d8d134ff2ca4226f2e48206b124409",
+    "semantic_hash": "06d8d134ff2ca4226f2e48206b124409"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/game/engine.ts": {
+    "mtime": 1784710577.2172246,
+    "ast_hash": "ae655454138e166f0dbe261b84758a82",
+    "semantic_hash": "ae655454138e166f0dbe261b84758a82"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/game/dice.ts": {
+    "mtime": 1784291136.8245196,
+    "ast_hash": "cac17ce79928ec6db66a0fa12fbefa9c",
+    "semantic_hash": "cac17ce79928ec6db66a0fa12fbefa9c"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/game/newCampaign.ts": {
+    "mtime": 1785412260.5848749,
+    "ast_hash": "d5dee38ef74c1cdd245cd94be97e3b50",
+    "semantic_hash": "d5dee38ef74c1cdd245cd94be97e3b50"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/game/controller.ts": {
+    "mtime": 1785872136.118156,
+    "ast_hash": "2ea599a83edd632e79a74abadec9230b",
+    "semantic_hash": "2ea599a83edd632e79a74abadec9230b"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ai/dualDm.ts": {
+    "mtime": 1785952325.825988,
+    "ast_hash": "add651f4df754660f3822f9e7f205c14",
+    "semantic_hash": "add651f4df754660f3822f9e7f205c14"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ai/summarizer.ts": {
+    "mtime": 1785872136.117479,
+    "ast_hash": "7c464368e67afd39be8002f9a6be1569",
+    "semantic_hash": "7c464368e67afd39be8002f9a6be1569"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ai/openaiDm.ts": {
+    "mtime": 1784901373.6852062,
+    "ast_hash": "30a53881132ebb0cf9e7eee395f3e7cc",
+    "semantic_hash": "30a53881132ebb0cf9e7eee395f3e7cc"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ai/toolSchema.ts": {
+    "mtime": 1784842465.4174492,
+    "ast_hash": "b0c017cf1d6d718b119ad19b3724d95c",
+    "semantic_hash": "b0c017cf1d6d718b119ad19b3724d95c"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ai/prompts.ts": {
+    "mtime": 1785872136.116967,
+    "ast_hash": "be57c08b2620d9030ac6bd6b232288d4",
+    "semantic_hash": "be57c08b2620d9030ac6bd6b232288d4"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ai/dm.ts": {
+    "mtime": 1785412260.5787225,
+    "ast_hash": "b217f1f7e446ea4069e39b224c6dc1b0",
+    "semantic_hash": "b217f1f7e446ea4069e39b224c6dc1b0"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ai/openaiHttp.ts": {
+    "mtime": 1785515980.777074,
+    "ast_hash": "cfd0e9d7b96cd0131d09b32e6d2bc7b4",
+    "semantic_hash": "cfd0e9d7b96cd0131d09b32e6d2bc7b4"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ai/argRepair.ts": {
+    "mtime": 1784842482.9890604,
+    "ast_hash": "e882896b61351d1d02059f8df6e233eb",
+    "semantic_hash": "e882896b61351d1d02059f8df6e233eb"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ai/tools.ts": {
+    "mtime": 1785721893.4696991,
+    "ast_hash": "027e68c8124dc3d43133da385c97cb62",
+    "semantic_hash": "027e68c8124dc3d43133da385c97cb62"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ai/suggestions.ts": {
+    "mtime": 1785413728.2297103,
+    "ast_hash": "b83f6f369bd9d8ad7c476fa45f7b6c15",
+    "semantic_hash": "b83f6f369bd9d8ad7c476fa45f7b6c15"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/ai/openaiStream.ts": {
+    "mtime": 1784842517.5362477,
+    "ast_hash": "2b0b6b6965498175cf2d420758baf343",
+    "semantic_hash": "2b0b6b6965498175cf2d420758baf343"
+  },
+  "/Users/Sergiu/DevG/D&D AI/README.md": {
+    "mtime": 1785412260.5669465,
+    "ast_hash": "245d5277f11d631c5580164ee6d7989f",
+    "semantic_hash": "245d5277f11d631c5580164ee6d7989f"
+  },
+  "/Users/Sergiu/DevG/D&D AI/docs/DEPLOY.md": {
+    "mtime": 1785412260.5682096,
+    "ast_hash": "5b50b16fd9099f19a6e19b6653a80965",
+    "semantic_hash": "5b50b16fd9099f19a6e19b6653a80965"
+  },
+  "/Users/Sergiu/DevG/D&D AI/docs/design/PLAN.md": {
+    "mtime": 1785412260.5692995,
+    "ast_hash": "c81d034bc2b4a01eff7ff8c890007197",
+    "semantic_hash": "c81d034bc2b4a01eff7ff8c890007197"
+  },
+  "/Users/Sergiu/DevG/D&D AI/docs/requirements/SRD-cloud-open-model-hud.md": {
+    "mtime": 1785708124.8041594,
+    "ast_hash": "97c3c1e2eadff1c311962263d05fd884",
+    "semantic_hash": "97c3c1e2eadff1c311962263d05fd884"
+  },
+  "/Users/Sergiu/DevG/D&D AI/docs/requirements/PRD-P1-pluggable-dm-backend.md": {
+    "mtime": 1785412260.570303,
+    "ast_hash": "4b1d1df253a852636e61368f80bafa40",
+    "semantic_hash": "4b1d1df253a852636e61368f80bafa40"
+  },
+  "/Users/Sergiu/DevG/D&D AI/docs/requirements/review-log.md": {
+    "mtime": 1785412260.5717468,
+    "ast_hash": "e50ef07455ca0a84b4ce7c6b348e8d06",
+    "semantic_hash": "e50ef07455ca0a84b4ce7c6b348e8d06"
+  },
+  "/Users/Sergiu/DevG/D&D AI/src/web/index.html": {
+    "mtime": 1785872238.1955943,
+    "ast_hash": "a45a5408b58c6ebf74cffafb679b9278",
+    "semantic_hash": "a45a5408b58c6ebf74cffafb679b9278"
+  }
+}

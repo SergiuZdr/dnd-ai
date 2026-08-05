@@ -479,7 +479,7 @@ describe('DualModelDmSession', () => {
   // man collapses, dead before he hits the ground", and called nothing else --
   // the fight paid no XP and the foe was never recorded. Prompting it about
   // defeat_foe did not fix that, so the code checks what the prompt cannot.
-  describe('missing defeat_foe nudge', () => {
+  describe('missing-consequence nudge (combat, loot, purchases)', () => {
     const toolCallChunk = (name: string, args: string) => ({
       choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_x', type: 'function' as const, function: { name, arguments: args } }] } }],
     });
@@ -751,6 +751,76 @@ describe('DualModelDmSession', () => {
       await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
 
       expect(fetchMock).toHaveBeenCalledTimes(3); // no nudge
+    });
+
+    // Live: "you hand over thirteen glinting gold pieces... a sturdy lantern, a
+    // coil of rope, and a compact bedroll" -- spend_gold fired, add_item never
+    // did, and the hero ended up strictly poorer for shopping. No roll is
+    // involved in a purchase, so the loot trigger cannot see this one.
+    it('fires when gold was paid and no item arrived', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          sseResponse([
+            toolCallChunk('spend_gold', '{"amount":8,"reason":"lantern, rope, bedroll"}'),
+            { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([
+            { choices: [{ delta: { content: 'She pays 8 gold for a lantern, rope and a bedroll.' } }] },
+            { choices: [{ delta: {}, finish_reason: 'stop' }] },
+          ]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([toolCallChunk('add_item', '{"name":"Lantern","qty":1}'), { choices: [{ delta: {}, finish_reason: 'tool_calls' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'Lantern recorded.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'The smith hands it over.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { engine, session, callbacks } = makeSession();
+      session.start();
+      session.send('I buy a lantern, rope and a bedroll.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      expect(engine.state.character.inventory).toEqual([{ name: 'Lantern', qty: 1 }]);
+    });
+
+    it('does not fire when the gold bought a service rather than an object', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          sseResponse([
+            toolCallChunk('spend_gold', '{"amount":5,"reason":"a room for the night"}'),
+            { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+          ]),
+        )
+        // The referee declines the nudge by simply reporting again.
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'She rents a room, 5 gold.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'She rents a room, 5 gold.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        )
+        .mockResolvedValueOnce(
+          sseResponse([{ choices: [{ delta: { content: 'The key is yours till dawn.' } }] }, { choices: [{ delta: {}, finish_reason: 'stop' }] }]),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const { engine, session, callbacks } = makeSession();
+      session.start();
+      session.send('I rent a room.');
+      await waitFor(() => (callbacks.onTurnComplete as any).mock.calls.length > 0);
+
+      // Nudged once (it cannot know a room is not an object), declined, and the
+      // turn still committed with no invented item.
+      expect(engine.state.character.inventory).toEqual([]);
+      expect(engine.state.character.gold).toBe(5);
     });
 
     it('does not mistake the hero going down for a victory', async () => {
