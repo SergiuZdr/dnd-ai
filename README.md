@@ -339,9 +339,6 @@ test/       mirrors src/ one-for-one -- test/game, test/ai, test/ui, test/web,
             after it. `npm test` runs all of it and makes no AI calls.
 
 docs/       DEPLOY.md (cloud runbook: Fly + Oracle Always-Free)
-  design/   PLAN.md -- architecture and the reasoning behind it
-  requirements/  the SRD/PRD that drove the pluggable-backend + cloud work,
-            kept as the historical "why", plus review-log.md
 
 scripts/
   smoke/    live end-to-end proofs against a REAL model endpoint. These BILL --
@@ -358,7 +355,7 @@ scripts/
 `smoke/` costs money when you run it and everything under `admin/` mutates
 saves, so the directory name is the warning.
 
-The engine owns every mechanical rule; the AI layer only narrates and calls tools the engine validates. The web server is a second front end on top of the exact same `GameController` the TUI uses — see `src/web/bridge.ts`'s header comment. See `docs/design/PLAN.md` for the full design writeup.
+The engine owns every mechanical rule; the AI layer only narrates and calls tools the engine validates. The web server is a second front end on top of the exact same `GameController` the TUI uses — see `src/web/bridge.ts`'s header comment.
 
 - `npm test` — the full vitest suite, no AI calls.
 - `npm run typecheck` — `tsc --noEmit`.

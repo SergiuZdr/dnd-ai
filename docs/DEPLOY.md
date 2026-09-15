@@ -1,10 +1,8 @@
-# DEPLOY — cloud, no tunnel (SRD Phase P2)
+# DEPLOY — cloud, no tunnel
 
 Goal: the game runs **always-on, on a public URL, with your laptop off**, and every player's turn spends **0 Claude tokens** (P1's `dmBackend:"openai"` path, talking to an OpenAI-compatible endpoint like OpenRouter; or P1.5's `dmBackend:"dual"` path — see below). Nothing below requires committing a `settings.json` or an API key — the server is configured **entirely via environment variables and secrets**.
 
 "0 Claude tokens" covers the chronicle summarizer too, not just play: `src/ai/summarizer.ts` follows the same `dmBackend` setting, so on `openai` **and** `dual` the chapter rollups go to your endpoint as well. (This is worth stating because it was briefly untrue — `dual` used to fall through to the Agent SDK, which on a headless host has no login to use and failed every rollup.)
-
-Read this alongside `docs/requirements/SRD-cloud-open-model-hud.md` (why) and `docs/requirements/PRD-P1-pluggable-dm-backend.md` (the OpenAI-compatible DM backend this deploy runs).
 
 ## What's new here vs. local dev
 
